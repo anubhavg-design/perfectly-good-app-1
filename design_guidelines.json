@@ -1,0 +1,118 @@
+{
+  "project_info": {
+    "name": "Perfectly Good",
+    "type": "react_native_expo",
+    "domain": "Surplus Food Marketplace",
+    "theme": "Light",
+    "archetype": "Organic & Earthy",
+    "description": "A mobile app connecting users with discounted surplus food from local restaurants."
+  },
+  "colors": {
+    "primary": "#2E7D32",
+    "background": "#FDFBF7",
+    "surface": "#FFFFFF",
+    "accent_urgent": "#C65D47",
+    "text_primary": "#1F2937",
+    "text_secondary": "#4B5563",
+    "border": "#E5E7EB",
+    "success": "#2E7D32",
+    "error": "#C65D47"
+  },
+  "typography": {
+    "headings_font": "Outfit",
+    "body_font": "DM Sans",
+    "font_loading_instructions": "Use @expo-google-fonts/outfit and @expo-google-fonts/dm-sans. Apply Outfit for all titles/headings and DM Sans for body text, inputs, and buttons.",
+    "scales": {
+      "h1": {
+        "fontSize": 32,
+        "fontWeight": "700",
+        "fontFamily": "Outfit"
+      },
+      "h2": {
+        "fontSize": 24,
+        "fontWeight": "700",
+        "fontFamily": "Outfit"
+      },
+      "h3": {
+        "fontSize": 20,
+        "fontWeight": "600",
+        "fontFamily": "Outfit"
+      },
+      "body": {
+        "fontSize": 16,
+        "fontWeight": "400",
+        "fontFamily": "DM Sans"
+      },
+      "small": {
+        "fontSize": 14,
+        "fontWeight": "400",
+        "fontFamily": "DM Sans"
+      },
+      "badge": {
+        "fontSize": 12,
+        "fontWeight": "700",
+        "fontFamily": "DM Sans",
+        "textTransform": "uppercase",
+        "letterSpacing": 1
+      }
+    }
+  },
+  "layout_and_spacing": {
+    "card_radius": 16,
+    "button_radius": 12,
+    "screen_padding": 16,
+    "bottom_tab_bar": "React Navigation Bottom Tabs. Active icon tint: #2E7D32, Inactive tint: #9CA3AF. Tab bar background: #FFFFFF. Remove top border or use a subtle #E5E7EB shadow."
+  },
+  "components": {
+    "FoodDropCard": "Use View with backgroundColor #FFFFFF, borderRadius 16, and overflow hidden. Top Image should be large (height ~200) spanning full width. Title in Outfit, subtitle/distance in DM Sans.",
+    "FloatingBadge": "Absolute positioning (e.g., top 12, right 12), backgroundColor #C65D47, rounded full, padding horizontal 12, padding vertical 4, white text. Ideal for 'Only 2 Left!'.",
+    "PrimaryButton": "TouchableOpacity with backgroundColor #2E7D32, borderRadius 12, height 48, justifyContent center, alignItems center. Text should be white, Outfit font, semi-bold.",
+    "UrgentButton": "TouchableOpacity with backgroundColor #C65D47. Use this for reserving low-quantity drops or critical alerts.",
+    "Input": "TextInput with backgroundColor #FFFFFF, borderColor #E5E7EB, borderWidth 1, borderRadius 12, padding 16, fontFamily DM Sans."
+  },
+  "motion_and_interactions": {
+    "transitions": "Use native stack screen transitions (slide-from-right or default iOS/Android native transition).",
+    "button_press": "Use TouchableOpacity activeOpacity 0.8 to give tactile feedback on button presses."
+  },
+  "icons": {
+    "library": "lucide-react-native",
+    "instructions": "Use lucide-react-native for a clean, consistent set of icons. Fallback to @expo/vector-icons (Feather) if necessary."
+  },
+  "media": {
+    "food_images": [
+      {
+        "url": "https://images.unsplash.com/photo-1764154842162-828669737223?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwxfHxiYWtlcnklMjBwYXN0cnklMjBmb29kfGVufDB8fHx8MTc3NjA3NDg1M3ww&ixlib=rb-4.1.0&q=85",
+        "category": "bakery_pastry",
+        "description": "Pastries displayed in a bakery case"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1578657084274-03b9d153b0dc?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwzfHxoZWFsdGh5JTIwc2FsYWQlMjBib3dsfGVufDB8fHx8MTc3NjA3NDg1M3ww&ixlib=rb-4.1.0&q=85",
+        "category": "healthy_salad",
+        "description": "Sliced vegetables in bowl beside breads"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1623406278878-ae6bd7d06c2d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODd8MHwxfHNlYXJjaHwzfHxwaXp6YSUyMGZhc3QlMjBmb29kfGVufDB8fHx8MTc3NjA3NDg1M3ww&ixlib=rb-4.1.0&q=85",
+        "category": "fast_food",
+        "description": "Pizza slice on wooden board"
+      }
+    ],
+    "restaurant_images": [
+      {
+        "url": "https://images.unsplash.com/photo-1729394405518-eaf2a0203aa7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwzfHxyZXN0YXVyYW50JTIwaW50ZXJpb3J8ZW58MHx8fHwxNzc2MDc0ODUzfDA&ixlib=rb-4.1.0&q=85",
+        "category": "restaurant_interior",
+        "description": "A restaurant interior with tables"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "This is a React Native Expo application, strictly use native components (View, Text, ScrollView, TouchableOpacity, Image) and NOT web HTML tags like div or span.",
+    "File extensions should be .js.",
+    "Do not use Shadcn web components. Create custom native components as described in the guidelines.",
+    "Map web Tailwind concepts to NativeWind or React Native StyleSheet depending on the setup. If creating StyleSheets, follow the exact hex codes provided: Primary #2E7D32, Background #FDFBF7, Urgent #C65D47.",
+    "Set up navigation using @react-navigation/native and @react-navigation/bottom-tabs. Include standard routing for Login, Home, Drop Detail, Checkout, My Orders, Profile, and Vendor/Admin dashboards.",
+    "Use testID prop on all interactive elements. Example: <TouchableOpacity testID='login-button'>",
+    "Implement the floating badges over the food images using absolute positioning to indicate urgency (e.g., '2 left').",
+    "Integrate a mock or actual flow for Razorpay checkout when reserving a food drop.",
+    "Ensure large food images are prominent on the Home Feed and Drop Detail screens, maintaining the requested 'mobile-native feel with smooth transitions'."
+  ]
+}
