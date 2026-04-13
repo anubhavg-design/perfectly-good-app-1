@@ -63,7 +63,11 @@ export default function AuthScreen() {
       }
       router.replace('/(tabs)/home');
     } catch (err: any) {
-      setError(err.message || 'Something went wrong');
+      if (err.status === 404) {
+        setError('Backend server is currently sleeping. Please visit green-grab-1.preview.emergentagent.com and click "Wake up servers", then try again.');
+      } else {
+        setError(err.message || 'Something went wrong');
+      }
     } finally {
       setSubmitting(false);
     }

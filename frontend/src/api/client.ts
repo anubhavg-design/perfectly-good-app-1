@@ -49,7 +49,19 @@ export async function apiFetch(path: string, options: FetchOptions = {}) {
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
-    throw new ApiError(response.status, errorBody.detail || errorBody.message || `HTTP ${response.status}`);
+    let message = errorBody.detail || errorBody.message || '';
+    if (!message) {
+      if (response.status === 404) {
+        message = 'Server is currently unavailable. Please try again later.';
+      } else if (response.status === 401) {
+        message = 'Invalid credentials or session expired.';
+      } else if (response.status === 502 || response.status === 503) {
+        message = 'Server is waking up. Please try again in a moment.';
+      } else {
+        message = `Something went wrong (${response.status})`;
+      }
+    }
+    throw new ApiError(response.status, message);
   }
 
   const text = await response.text();
