@@ -1,0 +1,93 @@
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authApi, loadToken, setToken } from '../api/client';
+
+export interface User {
+  user_id: string;
+  email: string;
+  name: string;
+  role: 'user' | 'vendor' | 'admin';
+  picture: string | null;
+  location: any;
+  created_at: string;
+}
+
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<User>;
+  register: (name: string, email: string, password: string) => Promise<User>;
+  logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType>({} as AuthContextType);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const userData = await authApi.me();
+      setUser(userData);
+      await AsyncStorage.setItem('user', JSON.stringify(userData));
+    } catch {
+      setUser(null);
+      await AsyncStorage.removeItem('user');
+      await setToken(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        await loadToken();
+        // Try to load cached user first for fast display
+        const cached = await AsyncStorage.getItem('user');
+        if (cached) {
+          setUser(JSON.parse(cached));
+        }
+        // Then verify with server
+        await refreshUser();
+      } catch {
+        // Not logged in
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const login = async (email: string, password: string) => {
+    const userData = await authApi.login({ email, password });
+    setUser(userData);
+    await AsyncStorage.setItem('user', JSON.stringify(userData));
+    return userData;
+  };
+
+  const register = async (name: string, email: string, password: string) => {
+    const userData = await authApi.register({ name, email, password });
+    setUser(userData);
+    await AsyncStorage.setItem('user', JSON.stringify(userData));
+    return userData;
+  };
+
+  const logout = async () => {
+    try {
+      await authApi.logout();
+    } catch {}
+    setUser(null);
+    await AsyncStorage.removeItem('user');
+    await setToken(null);
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
