@@ -60,6 +60,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const userData = await authApi.login({ email, password });
+    if (userData?.access_token) {
+      await setToken(userData.access_token);
+    }
     setUser(userData);
     await AsyncStorage.setItem('user', JSON.stringify(userData));
     return userData;
@@ -67,6 +70,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (name: string, email: string, password: string) => {
     const userData = await authApi.register({ name, email, password });
+    if (userData?.access_token) {
+      await setToken(userData.access_token);
+    }
     setUser(userData);
     await AsyncStorage.setItem('user', JSON.stringify(userData));
     return userData;
