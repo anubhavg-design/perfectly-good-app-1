@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const EXPO_PUBLIC_API_URL = process.env.EXPO_PUBLIC_API_URL;
 const EXPO_PUBLIC_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-const API_BASE = EXPO_PUBLIC_BACKEND_URL ? `${EXPO_PUBLIC_BACKEND_URL}/api` : '/api';
+const API_BASE = EXPO_PUBLIC_API_URL || (EXPO_PUBLIC_BACKEND_URL ? `${EXPO_PUBLIC_BACKEND_URL}/api` : '/api');
 
 let accessToken: string | null = null;
 
