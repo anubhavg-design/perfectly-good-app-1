@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE = 'https://green-grab-1.preview.emergentagent.com/api';
+const EXPO_PUBLIC_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const API_BASE = EXPO_PUBLIC_BACKEND_URL ? `${EXPO_PUBLIC_BACKEND_URL}/api` : '/api';
 
 let accessToken: string | null = null;
 
@@ -46,10 +47,13 @@ export async function apiFetch(path: string, options: FetchOptions = {}) {
     headers,
   });
 
-
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     let message = errorBody.detail || errorBody.message || '';
+    // Handle FastAPI 422 validation errors (array of objects)
+    if (Array.isArray(message)) {
+      message = message.map((e: any) => e.msg || JSON.stringify(e)).join('. ');
+    }
     if (!message) {
       if (response.status === 404) {
         message = 'Server is currently unavailable. Please try again later.';
@@ -79,21 +83,36 @@ export class ApiError extends Error {
 
 // Auth endpoints
 export const authApi = {
-  register: (data: { name: string; email: string; password: string }) =>
-    apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  register: async (data: { name: string; email: string; password: string }) => {
+    const res = await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data), skipAuth: true });
+    if (res?.access_token) {
+      await setToken(res.access_token);
+    }
+    return res;
+  },
 
-  login: (data: { email: string; password: string }) =>
-    apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
+  login: async (data: { email: string; password: string }) => {
+    const res = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(data), skipAuth: true });
+    if (res?.access_token) {
+      await setToken(res.access_token);
+    }
+    return res;
+  },
 
   me: () => apiFetch('/auth/me'),
 
-  logout: () => apiFetch('/auth/logout', { method: 'POST' }),
+  logout: async () => {
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' });
+    } catch {}
+    await setToken(null);
+  },
 
   forgotPassword: (email: string) =>
-    apiFetch('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+    apiFetch('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }), skipAuth: true }),
 
   resetPassword: (token: string, new_password: string) =>
-    apiFetch('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, new_password }) }),
+    apiFetch('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, new_password }), skipAuth: true }),
 };
 
 // Drops endpoints
