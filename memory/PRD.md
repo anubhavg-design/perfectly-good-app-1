@@ -5,49 +5,45 @@
 
 ## Architecture
 - **Frontend**: React Native (Expo SDK 54) with expo-router file-based navigation
-- **Backend**: External API at `https://green-grab-1.preview.emergentagent.com/api`
-- **Payments**: Razorpay via WebView (test key: rzp_test_SSfFeyx6ytVg0B)
-- **Auth**: Cookie-based JWT with Bearer token fallback
+- **Backend**: FastAPI with MongoDB (local), JWT auth, bcrypt password hashing
+- **Payments**: Razorpay via WebView (test key: rzp_test_SSfFeyx6ytVg0B, order creation mocked)
+- **Auth**: JWT Bearer tokens stored in AsyncStorage
 
-## Roles
-1. **User** — Browse drops, reserve food, view orders
-2. **Vendor** — Manage drops, manage orders, create new drops
-3. **Admin** — Onboard vendors, manage menus
+## API Endpoints (34 total, all tested)
+### Auth (6 endpoints)
+- POST /api/auth/register, POST /api/auth/login, GET /api/auth/me, POST /api/auth/logout
+- POST /api/auth/forgot-password, POST /api/auth/reset-password
 
-## Screens
+### Drops (3 endpoints)
+- GET /api/drops (with search, category, max_price, sort_by filters)
+- GET /api/drops/{item_id}, GET /api/drops/categories
 
-### Authentication
-- `app/index.tsx` — Login/Register with email + password, forgot password link
-- `app/forgot-password.tsx` — Forgot password flow (email → token → reset)
+### Orders (3 endpoints)
+- POST /api/orders/create, POST /api/orders/verify, GET /api/orders/user
 
-### User Screens (Bottom Tabs)
-- `app/(tabs)/home.tsx` — Home feed with search, category filter, sort, food drop cards with images/prices/badges/countdown
-- `app/(tabs)/orders.tsx` — My Orders list with status badges (reserved/picked_up/cancelled/expired)
-- `app/(tabs)/profile.tsx` — User info, admin panel link (admin), become vendor (user), logout
+### Vendor (6 endpoints)
+- GET /api/vendor/menu, GET /api/vendor/drops, POST /api/vendor/drops
+- PUT /api/vendor/drops/{id}, GET /api/vendor/orders, PUT /api/vendor/orders/{id}/status
 
-### Detail Screens
-- `app/drop/[id].tsx` — Drop detail with large image, pricing breakdown, savings %, pickup window, Reserve button
-- `app/checkout.tsx` — Quantity picker, price breakdown (subtotal + 5% fee), Razorpay WebView payment
+### Admin (6 endpoints)
+- GET /api/admin/vendors, POST /api/admin/vendors, DELETE /api/admin/vendors/{id}
+- GET /api/admin/vendors/{id}/menu, POST /api/admin/vendors/{id}/menu
+- DELETE /api/admin/menu-items/{id}, POST /api/admin/upload
 
-### Vendor Screens
-- `app/(tabs)/dashboard.tsx` — My Drops (toggle active/inactive) + Orders (Mark Picked Up / Cancel)
-- `app/vendor-create-drop.tsx` — Select menu item, set discounted price, quantity, pickup times
+## Seed Data
+- Admin: admin@perfectlygood.com / admin123
+- Vendor 1: vendor@demo.com / vendor123 (Green Leaf Bakery, 3 menu items, 3 drops)
+- Vendor 2: spicegarden@demo.com / vendor123 (Spice Garden, 3 menu items, 3 drops)
+- Total: 6 active drops, 6 menu items, 2 vendors
 
-### Admin Screens
-- `app/admin.tsx` — Vendor list, create vendor, per-vendor menu management (add/delete items)
+## Screens (12 total)
+- Login/Register, Forgot Password
+- Home Feed (search + filters), Drop Detail, Checkout (Razorpay WebView)
+- My Orders, Profile
+- Vendor Dashboard (Drops + Orders tabs), Create Drop
+- Admin Panel (vendor & menu CRUD)
 
 ## Design System
-- **Primary**: #2E7D32 (green), **Background**: #FDFBF7, **Urgent**: #C65D47
-- **Fonts**: Outfit (headings), DM Sans (body)
-- **Cards**: 16px radius, shadows, floating badges on images
-- **Icons**: lucide-react-native
-
-## API Endpoints Used
-- Auth: /auth/register, /auth/login, /auth/me, /auth/logout, /auth/forgot-password, /auth/reset-password
-- Drops: /drops, /drops/{id}, /drops/categories
-- Orders: /orders/create, /orders/verify, /orders/user
-- Vendor: /vendor/drops, /vendor/orders, /vendor/menu
-- Admin: /admin/vendors, /admin/vendors/{id}/menu, /admin/menu-items/{id}
-
-## Default Location
-- Bangalore (lat: 12.9716, lon: 77.5946) used as fallback when geolocation unavailable
+- Primary: #2E7D32, Background: #FDFBF7, Urgent: #C65D47
+- Fonts: Outfit (headings), DM Sans (body)
+- Cards: 16px radius, floating badges, large food images
