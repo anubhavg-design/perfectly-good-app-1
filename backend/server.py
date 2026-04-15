@@ -492,6 +492,69 @@ async def update_vendor_order_status(order_id: str, body: UpdateOrderStatusBody,
         raise HTTPException(status_code=404, detail="Order not found")
     return {"message": "Status updated", "status": body.status}
 
+# ── Vendor Payouts ──────────────────────────────────────────────────────
+
+COMMISSION_RATE = 0.15
+
+@api.get("/vendor/payouts/summary")
+async def vendor_payouts_summary(request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    vid = vendor["vendor_id"]
+    completed = await db.orders.find({"vendor_id": vid, "status": "picked_up"}, {"_id": 0}).to_list(10000)
+    total_revenue = 0
+    for o in completed:
+        drop = await db.drops.find_one({"item_id": o.get("food_item_id")}, {"_id": 0, "discounted_price": 1})
+        dp = drop["discounted_price"] if drop else o.get("total_amount", 0) / max(o.get("quantity", 1), 1)
+        total_revenue += dp * o.get("quantity", 1)
+    total_revenue = round(total_revenue, 2)
+    total_commission = round(total_revenue * COMMISSION_RATE, 2)
+    net_earnings = round(total_revenue - total_commission, 2)
+    payouts = await db.payouts.find({"vendor_id": vid}, {"_id": 0}).to_list(10000)
+    total_paid = round(sum(p.get("amount", 0) for p in payouts), 2)
+    pending_payout = round(net_earnings - total_paid, 2)
+    return {
+        "total_orders_completed": len(completed),
+        "total_revenue": total_revenue,
+        "total_commission": total_commission,
+        "net_earnings": net_earnings,
+        "total_paid": total_paid,
+        "pending_payout": pending_payout,
+    }
+
+@api.get("/vendor/payouts/orders")
+async def vendor_payouts_orders(request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    completed = await db.orders.find(
+        {"vendor_id": vendor["vendor_id"], "status": "picked_up"}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    result = []
+    for o in completed:
+        drop = await db.drops.find_one({"item_id": o.get("food_item_id")}, {"_id": 0, "discounted_price": 1})
+        dp = drop["discounted_price"] if drop else o.get("total_amount", 0) / max(o.get("quantity", 1), 1)
+        qty = o.get("quantity", 1)
+        line_total = round(dp * qty, 2)
+        commission = round(line_total * COMMISSION_RATE, 2)
+        result.append({
+            "order_id": o["order_id"],
+            "food_item_name": o.get("food_item_name", ""),
+            "quantity": qty,
+            "discounted_price": dp,
+            "vendor_earning": round(line_total - commission, 2),
+            "commission": commission,
+            "created_at": o["created_at"].isoformat() if hasattr(o.get("created_at"), "isoformat") else str(o.get("created_at", "")),
+        })
+    return result
+
 # ══════════════════════════════════════════════════════════════════════════
 #  ADMIN
 # ══════════════════════════════════════════════════════════════════════════
@@ -509,6 +572,11 @@ class AddMenuItemBody(BaseModel):
     description: Optional[str] = ""
     original_price: float
     image_url: Optional[str] = ""
+
+class AddPayoutBody(BaseModel):
+    vendor_id: str
+    amount: float
+    note: Optional[str] = ""
 
 @api.get("/admin/vendors")
 async def admin_vendors(request: Request):
@@ -606,6 +674,70 @@ async def admin_delete_menu_item(menu_item_id: str, request: Request):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Menu item not found")
     return {"message": "Menu item deleted"}
+
+# ── Admin Payouts ───────────────────────────────────────────────────────
+
+@api.post("/admin/payouts/add")
+async def admin_add_payout(body: AddPayoutBody, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    vendor = await db.vendors.find_one({"vendor_id": body.vendor_id}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    payout_doc = {
+        "payout_id": gen_id("payout"),
+        "vendor_id": body.vendor_id,
+        "amount": round(body.amount, 2),
+        "note": body.note or "",
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.payouts.insert_one(payout_doc)
+    payout_doc.pop("_id", None)
+    if hasattr(payout_doc.get("created_at"), "isoformat"):
+        payout_doc["created_at"] = payout_doc["created_at"].isoformat()
+    return payout_doc
+
+@api.get("/admin/payouts/vendors")
+async def admin_payouts_vendors(request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    vendors = await db.vendors.find({}, {"_id": 0}).to_list(200)
+    result = []
+    for v in vendors:
+        vid = v["vendor_id"]
+        completed = await db.orders.find({"vendor_id": vid, "status": "picked_up"}, {"_id": 0}).to_list(10000)
+        total_revenue = 0
+        for o in completed:
+            drop = await db.drops.find_one({"item_id": o.get("food_item_id")}, {"_id": 0, "discounted_price": 1})
+            dp = drop["discounted_price"] if drop else o.get("total_amount", 0) / max(o.get("quantity", 1), 1)
+            total_revenue += dp * o.get("quantity", 1)
+        total_revenue = round(total_revenue, 2)
+        commission = round(total_revenue * COMMISSION_RATE, 2)
+        net_earnings = round(total_revenue - commission, 2)
+        payouts = await db.payouts.find({"vendor_id": vid}, {"_id": 0}).to_list(10000)
+        total_paid = round(sum(p.get("amount", 0) for p in payouts), 2)
+        result.append({
+            "vendor_id": vid,
+            "vendor_name": v.get("name", ""),
+            "total_orders_completed": len(completed),
+            "net_earnings": net_earnings,
+            "total_paid": total_paid,
+            "pending_payout": round(net_earnings - total_paid, 2),
+        })
+    return result
+
+@api.get("/admin/payouts/{vendor_id}/history")
+async def admin_payout_history(vendor_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    payouts = await db.payouts.find({"vendor_id": vendor_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    for p in payouts:
+        if hasattr(p.get("created_at"), "isoformat"):
+            p["created_at"] = p["created_at"].isoformat()
+    return payouts
 
 @api.post("/admin/upload")
 async def admin_upload(file: UploadFile = File(...), request: Request = None):

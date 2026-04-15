@@ -163,6 +163,10 @@ export const vendorApi = {
 
   createDrop: (data: { menu_item_id: string; discounted_price: number; quantity_available: number; pickup_start_time: string; pickup_end_time: string }) =>
     apiFetch('/vendor/drops', { method: 'POST', body: JSON.stringify(data) }),
+
+  payoutsSummary: () => apiFetch('/vendor/payouts/summary'),
+
+  payoutsOrders: () => apiFetch('/vendor/payouts/orders'),
 };
 
 // Admin endpoints
@@ -183,6 +187,14 @@ export const adminApi = {
 
   deleteMenuItem: (id: string) =>
     apiFetch(`/admin/menu-items/${id}`, { method: 'DELETE' }),
+
+  payoutsVendors: () => apiFetch('/admin/payouts/vendors'),
+
+  addPayout: (data: { vendor_id: string; amount: number; note: string }) =>
+    apiFetch('/admin/payouts/add', { method: 'POST', body: JSON.stringify(data) }),
+
+  payoutHistory: (vendorId: string) =>
+    apiFetch(`/admin/payouts/${vendorId}/history`),
 
   upload: async (formData: FormData) => {
     const token = await getToken();
