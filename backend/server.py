@@ -780,9 +780,15 @@ async def seed_data():
             "created_at": datetime.now(timezone.utc),
         })
         logger.info(f"Admin seeded: {admin_email}")
-    elif not verify_password(admin_password, existing_admin.get("password_hash", "")):
-        await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
-        logger.info(f"Admin password updated")
+    else:
+        updates = {}
+        if existing_admin.get("role") != "admin":
+            updates["role"] = "admin"
+        if not verify_password(admin_password, existing_admin.get("password_hash", "")):
+            updates["password_hash"] = hash_password(admin_password)
+        if updates:
+            await db.users.update_one({"email": admin_email}, {"$set": updates})
+            logger.info(f"Admin updated: {admin_email}")
 
     # Seed vendor user + vendor profile
     existing_vendor = await db.users.find_one({"email": vendor_email})
