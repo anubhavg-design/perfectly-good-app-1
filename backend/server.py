@@ -251,6 +251,38 @@ async def send_push_to_vendor(vendor_id: str, title: str, body: str, data: dict 
     except Exception as e:
         logger.error(f"Push notification failed: {e}")
 
+async def send_push_to_all_users(title: str, body: str, data: dict = None):
+    """Broadcast push notification to all users (non-vendor) with push tokens."""
+    users = await db.users.find(
+        {"push_token": {"$exists": True, "$ne": None}, "role": "user"},
+        {"_id": 0, "push_token": 1},
+    ).to_list(10000)
+    tokens = [u["push_token"] for u in users if u.get("push_token")]
+    if not tokens:
+        logger.info("No user push tokens found, skipping broadcast")
+        return
+
+    messages = []
+    for token in tokens:
+        msg = {"to": token, "sound": "default", "title": title, "body": body, "channelId": "orders"}
+        if data:
+            msg["data"] = data
+        messages.append(msg)
+
+    # Expo push API supports batches of up to 100
+    for i in range(0, len(messages), 100):
+        batch = messages[i:i+100]
+        try:
+            resp = http_requests.post(
+                "https://exp.host/--/api/v2/push/send",
+                json=batch,
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
+            logger.info(f"Broadcast push sent to {len(batch)} users: {resp.status_code}")
+        except Exception as e:
+            logger.error(f"Broadcast push failed: {e}")
+
 # ══════════════════════════════════════════════════════════════════════════
 #  DROPS
 # ══════════════════════════════════════════════════════════════════════════
@@ -508,6 +540,15 @@ async def create_vendor_drop(body: CreateDropBody, request: Request):
     drop_doc.pop("_id", None)
     if hasattr(drop_doc.get("created_at"), "isoformat"):
         drop_doc["created_at"] = drop_doc["created_at"].isoformat()
+
+    # Notify all users about the new listing
+    discount = round(((menu_item["original_price"] - body.discounted_price) / menu_item["original_price"]) * 100)
+    await send_push_to_all_users(
+        title=f"{vendor.get('name', 'A vendor')} just dropped!",
+        body=f"{menu_item['name']} — ₹{body.discounted_price} ({discount}% off). Pickup {body.pickup_start_time}–{body.pickup_end_time}",
+        data={"item_id": item_id, "type": "new_drop"},
+    )
+
     return drop_doc
 
 @api.put("/vendor/drops/{item_id}")

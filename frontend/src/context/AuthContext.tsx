@@ -25,15 +25,13 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 async function tryRegisterPush(role: string) {
-  if (role === 'vendor' || role === 'admin') {
-    try {
-      const token = await registerForPushNotifications();
-      if (token) {
-        await savePushToken(token);
-      }
-    } catch (err) {
-      console.log('Push registration skipped:', err);
+  try {
+    const token = await registerForPushNotifications();
+    if (token) {
+      await savePushToken(token);
     }
+  } catch (err) {
+    console.log('Push registration skipped:', err);
   }
 }
 
