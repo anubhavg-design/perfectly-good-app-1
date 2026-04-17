@@ -18,6 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 import math
+import requests as http_requests
 
 # ── Config ──────────────────────────────────────────────────────────────
 MONGO_URL = os.environ["MONGO_URL"]
@@ -204,6 +205,52 @@ async def reset_password(body: ResetPasswordBody):
     await db.password_reset_tokens.update_one({"token": body.token}, {"$set": {"used": True}})
     return {"message": "Password reset successfully"}
 
+# ── Push Notifications ──────────────────────────────────────────────────
+
+class PushTokenBody(BaseModel):
+    push_token: str
+
+@api.post("/auth/push-token")
+async def save_push_token(body: PushTokenBody, request: Request):
+    user = await get_current_user(request)
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"push_token": body.push_token}},
+    )
+    return {"message": "Push token saved"}
+
+async def send_push_to_vendor(vendor_id: str, title: str, body: str, data: dict = None):
+    """Send push notification to all devices registered for this vendor."""
+    vendor = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not vendor:
+        return
+    vendor_user = await db.users.find_one({"user_id": vendor.get("user_id")}, {"_id": 0})
+    if not vendor_user or not vendor_user.get("push_token"):
+        logger.info(f"No push token for vendor {vendor_id}, skipping notification")
+        return
+
+    push_token = vendor_user["push_token"]
+    message = {
+        "to": push_token,
+        "sound": "default",
+        "title": title,
+        "body": body,
+        "channelId": "orders",
+    }
+    if data:
+        message["data"] = data
+
+    try:
+        resp = http_requests.post(
+            "https://exp.host/--/api/v2/push/send",
+            json=message,
+            headers={"Content-Type": "application/json"},
+            timeout=5,
+        )
+        logger.info(f"Push sent to vendor {vendor_id}: {resp.status_code}")
+    except Exception as e:
+        logger.error(f"Push notification failed: {e}")
+
 # ══════════════════════════════════════════════════════════════════════════
 #  DROPS
 # ══════════════════════════════════════════════════════════════════════════
@@ -367,6 +414,14 @@ async def verify_order(body: VerifyOrderBody, request: Request):
         {"$inc": {"quantity_available": -body.quantity}},
     )
     await db.pending_orders.delete_one({"razorpay_order_id": body.razorpay_order_id})
+
+    # Send push notification to vendor
+    await send_push_to_vendor(
+        vendor_id=drop.get("vendor_id", ""),
+        title="New Order!",
+        body=f"{user.get('name', 'A customer')} reserved {body.quantity}× {drop.get('name', 'item')} — ₹{pending.get('total_amount', 0)}",
+        data={"order_id": order_id, "type": "new_order"},
+    )
 
     return {"message": "Order confirmed", "order_id": order_id}
 

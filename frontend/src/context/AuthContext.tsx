@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authApi, loadToken, setToken } from '../api/client';
+import { registerForPushNotifications, savePushToken } from '../utils/notifications';
 
 export interface User {
   user_id: string;
@@ -23,6 +24,19 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
+async function tryRegisterPush(role: string) {
+  if (role === 'vendor' || role === 'admin') {
+    try {
+      const token = await registerForPushNotifications();
+      if (token) {
+        await savePushToken(token);
+      }
+    } catch (err) {
+      console.log('Push registration skipped:', err);
+    }
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -32,6 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const userData = await authApi.me();
       setUser(userData);
       await AsyncStorage.setItem('user', JSON.stringify(userData));
+      tryRegisterPush(userData.role);
     } catch {
       setUser(null);
       await AsyncStorage.removeItem('user');
@@ -43,12 +58,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         await loadToken();
-        // Try to load cached user first for fast display
         const cached = await AsyncStorage.getItem('user');
         if (cached) {
           setUser(JSON.parse(cached));
         }
-        // Then verify with server
         await refreshUser();
       } catch {
         // Not logged in
@@ -65,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(userData);
     await AsyncStorage.setItem('user', JSON.stringify(userData));
+    tryRegisterPush(userData.role);
     return userData;
   };
 
@@ -75,6 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(userData);
     await AsyncStorage.setItem('user', JSON.stringify(userData));
+    tryRegisterPush(userData.role);
     return userData;
   };
 
