@@ -10,7 +10,7 @@ import { ArrowLeft, Minus, Plus, ShieldCheck } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { ordersApi } from '../src/api/client';
 
-const RAZORPAY_KEY = 'rzp_test_SSfFeyx6ytVg0B';
+const RAZORPAY_KEY = process.env.EXPO_PUBLIC_RAZORPAY_KEY || 'rzp_test_SSfFeyx6ytVg0B';
 
 export default function CheckoutScreen() {
   const params = useLocalSearchParams<{

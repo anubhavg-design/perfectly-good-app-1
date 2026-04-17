@@ -145,6 +145,9 @@ export const ordersApi = {
     apiFetch('/orders/verify', { method: 'POST', body: JSON.stringify(data) }),
 
   userOrders: () => apiFetch('/orders/user'),
+
+  cancelOrder: (orderId: string) =>
+    apiFetch(`/orders/${orderId}/cancel`, { method: 'PUT' }),
 };
 
 // Vendor endpoints

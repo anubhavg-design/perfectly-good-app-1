@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  ActivityIndicator, RefreshControl,
+  ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -56,12 +56,37 @@ export default function OrdersScreen() {
     setRefreshing(false);
   };
 
+  const handleCancel = (orderId: string, itemName: string) => {
+    Alert.alert(
+      'Cancel Order',
+      `Cancel your reservation for "${itemName}"? The quantity will be restored for others.`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Cancel Order',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await ordersApi.cancelOrder(orderId);
+              setOrders(prev =>
+                prev.map(o => o.order_id === orderId ? { ...o, status: 'cancelled' } : o)
+              );
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to cancel order');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderOrder = ({ item }: { item: Order }) => {
     const config = STATUS_CONFIG[item.status] || STATUS_CONFIG.reserved;
     const Icon = config.icon;
     const date = new Date(item.created_at).toLocaleDateString('en-IN', {
       day: 'numeric', month: 'short', year: 'numeric',
     });
+    const isReserved = item.status === 'reserved';
 
     return (
       <View testID={`order-card-${item.order_id}`} style={styles.card}>
@@ -88,6 +113,18 @@ export default function OrdersScreen() {
           </View>
           <Text style={styles.totalAmount}>₹{item.total_amount}</Text>
         </View>
+
+        {isReserved && (
+          <TouchableOpacity
+            testID={`cancel-order-${item.order_id}`}
+            style={styles.cancelBtn}
+            onPress={() => handleCancel(item.order_id, item.food_item_name)}
+            activeOpacity={0.7}
+          >
+            <XCircle size={15} color={COLORS.error} />
+            <Text style={styles.cancelBtnText}>Cancel Reservation</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
@@ -152,6 +189,12 @@ const styles = StyleSheet.create({
   detailLabel: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted },
   detailValue: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textPrimary },
   totalAmount: { fontSize: 18, fontFamily: 'Outfit_700Bold', color: COLORS.primary, marginLeft: 'auto' },
+  cancelBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    marginTop: SPACING.sm, paddingVertical: SPACING.sm,
+    borderTopWidth: 1, borderTopColor: COLORS.borderLight,
+  },
+  cancelBtnText: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.error },
   emptyState: { alignItems: 'center', paddingTop: 100 },
   emptyTitle: { fontSize: 20, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginTop: SPACING.md },
   emptySubtitle: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: SPACING.xs },

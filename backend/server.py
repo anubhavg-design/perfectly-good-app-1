@@ -18,6 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 import math
+import re
 import requests as http_requests
 
 # ── Config ──────────────────────────────────────────────────────────────
@@ -126,9 +127,17 @@ class ResetPasswordBody(BaseModel):
     token: str
     new_password: str
 
+EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+
 @api.post("/auth/register")
 async def register(body: RegisterBody):
     email = body.email.strip().lower()
+    if not EMAIL_REGEX.match(email):
+        raise HTTPException(status_code=400, detail="Please enter a valid email address")
+    if len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
     user_id = gen_id("user")
@@ -460,11 +469,42 @@ async def verify_order(body: VerifyOrderBody, request: Request):
 @api.get("/orders/user")
 async def user_orders(request: Request):
     user = await get_current_user(request)
+    # Auto-expire stale reserved orders (pickup_end_time passed)
+    now = datetime.now(timezone.utc)
+    reserved = await db.orders.find({"user_id": user["user_id"], "status": "reserved"}, {"_id": 0}).to_list(500)
+    for o in reserved:
+        try:
+            end_h, end_m = map(int, o.get("pickup_end_time", "23:59").split(":"))
+            order_date = o.get("created_at", now)
+            if hasattr(order_date, 'date'):
+                expire_at = order_date.replace(hour=end_h, minute=end_m, second=0, tzinfo=timezone.utc)
+                if expire_at < order_date:
+                    expire_at += timedelta(days=1)
+                if now > expire_at:
+                    await db.orders.update_one({"order_id": o["order_id"]}, {"$set": {"status": "expired"}})
+        except Exception:
+            pass
     orders = await db.orders.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
     for o in orders:
         if "created_at" in o and hasattr(o["created_at"], "isoformat"):
             o["created_at"] = o["created_at"].isoformat()
     return orders
+
+@api.put("/orders/{order_id}/cancel")
+async def cancel_user_order(order_id: str, request: Request):
+    user = await get_current_user(request)
+    order = await db.orders.find_one({"order_id": order_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order["status"] != "reserved":
+        raise HTTPException(status_code=400, detail="Only reserved orders can be cancelled")
+    await db.orders.update_one({"order_id": order_id}, {"$set": {"status": "cancelled"}})
+    # Restore drop quantity
+    await db.drops.update_one(
+        {"item_id": order.get("food_item_id")},
+        {"$inc": {"quantity_available": order.get("quantity", 0)}},
+    )
+    return {"message": "Order cancelled"}
 
 # ══════════════════════════════════════════════════════════════════════════
 #  VENDOR

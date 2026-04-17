@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { User, Mail, Shield, LogOut, ChevronRight, Store } from 'lucide-react-native';
+import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 
@@ -109,6 +109,22 @@ export default function ProfileScreen() {
               </View>
             </View>
           )}
+
+          <TouchableOpacity
+            testID="privacy-policy-btn"
+            style={styles.actionCard}
+            onPress={() => router.push('/privacy-policy')}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#F0FDF4' }]}>
+              <FileText size={20} color={COLORS.primary} />
+            </View>
+            <View style={styles.actionContent}>
+              <Text style={styles.actionTitle}>Privacy Policy</Text>
+              <Text style={styles.actionSubtitle}>How we handle your data</Text>
+            </View>
+            <ChevronRight size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
         </View>
 
         {/* Logout */}

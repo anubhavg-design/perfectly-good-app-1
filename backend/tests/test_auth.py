@@ -112,3 +112,40 @@ class TestAuth:
         data = response.json()
         assert "message" in data
         print("✓ Logout successful")
+
+    def test_register_invalid_email(self, base_url, api_client):
+        """Test registration with invalid email format returns 400"""
+        response = api_client.post(
+            f"{base_url}/api/auth/register",
+            json={
+                "name": "Test User",
+                "email": "notanemail",
+                "password": "test1234"
+            }
+        )
+        assert response.status_code == 400, f"Expected 400, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert "detail" in data, "Response missing detail field"
+        assert data["detail"] == "Please enter a valid email address", f"Expected 'Please enter a valid email address', got '{data['detail']}'"
+        print("✓ Invalid email format rejected with 400 and correct message")
+
+    def test_register_short_password(self, base_url, api_client):
+        """Test registration with password < 6 chars returns 400"""
+        import time
+        email = f"TEST_user_{int(time.time())}@test.com"
+        
+        response = api_client.post(
+            f"{base_url}/api/auth/register",
+            json={
+                "name": "Test User",
+                "email": email,
+                "password": "ab"
+            }
+        )
+        assert response.status_code == 400, f"Expected 400, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert "detail" in data, "Response missing detail field"
+        assert data["detail"] == "Password must be at least 6 characters", f"Expected 'Password must be at least 6 characters', got '{data['detail']}'"
+        print("✓ Short password rejected with 400 and correct message")

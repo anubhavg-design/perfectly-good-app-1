@@ -54,6 +54,17 @@ export default function AuthScreen() {
       setError('Please enter your name');
       return;
     }
+    // Email validation
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    // Password strength
+    if (!isLogin && password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
     setSubmitting(true);
     try {
       if (isLogin) {
@@ -63,8 +74,8 @@ export default function AuthScreen() {
       }
       router.replace('/(tabs)/home');
     } catch (err: any) {
-      if (err.status === 404) {
-        setError('Backend server is currently sleeping. Please visit green-grab-1.preview.emergentagent.com and click "Wake up servers", then try again.');
+      if (err.message && err.message.includes('fetch')) {
+        setError('Unable to connect to server. Please check your internet connection.');
       } else {
         setError(err.message || 'Something went wrong');
       }
@@ -205,9 +216,11 @@ export default function AuthScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.footerText}>
-            By continuing, you agree to our Terms of Service
-          </Text>
+          <TouchableOpacity onPress={() => router.push('/privacy-policy')}>
+            <Text style={styles.footerText}>
+              By continuing, you agree to our Terms of Service & Privacy Policy
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
