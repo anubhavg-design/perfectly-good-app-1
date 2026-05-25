@@ -105,33 +105,35 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * 2 * math.asin(math.sqrt(a))
 
 def resolve_place_id(place_id: str) -> dict:
-    """Resolve a Google Place ID to lat/lng/address using Places API (New)."""
-    if not GOOGLE_MAPS_API_KEY or not place_id:
+    """Kept for backwards compat — not used when no Google API key."""
+    return {}
+
+def geocode_address(address: str) -> dict:
+    """Geocode an address using free OpenStreetMap Nominatim API."""
+    if not address:
         return {}
     try:
         resp = http_requests.get(
-            f"https://places.googleapis.com/v1/places/{place_id}",
-            params={"languageCode": "en"},
-            headers={
-                "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
-                "X-Goog-FieldMask": "displayName,formattedAddress,location",
-            },
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": address, "format": "json", "limit": 1, "addressdetails": 1},
+            headers={"User-Agent": "PerfectlyGood/1.0"},
             timeout=5,
         )
-        data = resp.json()
-        if resp.status_code == 200 and "location" in data:
-            loc = data["location"]
+        results = resp.json()
+        if results and len(results) > 0:
+            r = results[0]
+            lat = float(r.get("lat", 0))
+            lon = float(r.get("lon", 0))
+            display = r.get("display_name", address)
             return {
-                "lat": loc.get("latitude"),
-                "lon": loc.get("longitude"),
-                "address": data.get("formattedAddress", ""),
-                "place_name": data.get("displayName", {}).get("text", ""),
-                "place_id": place_id,
-                "maps_url": f"https://www.google.com/maps/place/?q=place_id:{place_id}",
+                "lat": lat,
+                "lon": lon,
+                "address": display,
+                "maps_url": f"https://www.google.com/maps/search/?api=1&query={lat},{lon}",
             }
-        logger.warning(f"Place ID resolve failed: {data.get('error', {}).get('message', resp.text[:200])}")
+        logger.warning(f"Geocode failed for: {address}")
     except Exception as e:
-        logger.error(f"Place ID resolve error: {e}")
+        logger.error(f"Geocode error: {e}")
     return {}
 
 # ── App ─────────────────────────────────────────────────────────────────
@@ -764,14 +766,14 @@ async def admin_vendors(request: Request):
     vendors = await db.vendors.find({}, {"_id": 0}).to_list(200)
     return vendors
 
-@api.get("/admin/place-lookup/{place_id}")
-async def admin_place_lookup(place_id: str, request: Request):
+@api.get("/admin/geocode")
+async def admin_geocode(address: str, request: Request):
     user = await get_current_user(request)
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
-    location = resolve_place_id(place_id)
+    location = geocode_address(address)
     if not location:
-        raise HTTPException(status_code=400, detail="Could not resolve Place ID. Check the ID and try again.")
+        raise HTTPException(status_code=400, detail="Could not find this address. Try being more specific.")
     return location
 
 @api.post("/admin/vendors")
@@ -786,11 +788,13 @@ async def admin_create_vendor(body: CreateVendorBody, request: Request):
     user_id = gen_id("user")
     vendor_id = gen_id("vendor")
 
-    # Resolve location from place_id or use provided location
+    # Resolve location from address or use provided location
     if body.place_id:
-        location = resolve_place_id(body.place_id)
+        # place_id field now used as address text for geocoding
+        location = geocode_address(body.place_id)
         if not location:
-            raise HTTPException(status_code=400, detail="Invalid Place ID or Google Maps API error")
+            # Fallback: store address as-is without coordinates
+            location = {"lat": 0, "lon": 0, "address": body.place_id, "maps_url": f"https://www.google.com/maps/search/?api=1&query={body.place_id.replace(' ', '+')}"}
     elif body.location:
         location = body.location
     else:

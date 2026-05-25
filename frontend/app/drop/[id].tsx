@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, Image, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator,
+  ScrollView, ActivityIndicator, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Clock, MapPin, Users, Tag } from 'lucide-react-native';
+import { ArrowLeft, Clock, MapPin, Users, Tag, ExternalLink } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi } from '../../src/api/client';
 
@@ -136,13 +136,23 @@ export default function DropDetailScreen() {
                 <Text style={styles.infoValue}>{drop.pickup_start_time} — {drop.pickup_end_time}</Text>
               </View>
             </View>
-            <View style={styles.infoRow}>
-              <MapPin size={18} color={COLORS.textSecondary} />
-              <View>
+            <TouchableOpacity
+              testID="open-maps-btn"
+              style={styles.infoRow}
+              onPress={() => {
+                const loc = drop.vendor_location;
+                const mapsUrl = loc?.maps_url || (loc?.lat && loc?.lon ? `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lon}` : null);
+                if (mapsUrl) Linking.openURL(mapsUrl);
+              }}
+              activeOpacity={0.7}
+            >
+              <MapPin size={18} color={COLORS.primary} />
+              <View style={{ flex: 1 }}>
                 <Text style={styles.infoLabel}>Location</Text>
                 <Text style={styles.infoValue}>{drop.vendor_location?.address || 'Nearby'}</Text>
               </View>
-            </View>
+              <ExternalLink size={16} color={COLORS.primary} />
+            </TouchableOpacity>
             <View style={styles.infoRow}>
               <Users size={18} color={COLORS.textSecondary} />
               <View>

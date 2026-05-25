@@ -176,7 +176,7 @@ export const vendorApi = {
 export const adminApi = {
   vendors: () => apiFetch('/admin/vendors'),
 
-  createVendor: (data: { name: string; category: string; email: string; password: string; location: any; logo_url?: string; service_type?: string }) =>
+  createVendor: (data: { name: string; category: string; email: string; password: string; place_id?: string; location?: any; logo_url?: string; service_type?: string }) =>
     apiFetch('/admin/vendors', { method: 'POST', body: JSON.stringify(data) }),
 
   deleteVendor: (id: string) =>
