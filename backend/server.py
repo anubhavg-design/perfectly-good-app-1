@@ -29,6 +29,7 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE = timedelta(hours=24)
 REFRESH_TOKEN_EXPIRE = timedelta(days=7)
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "rzp_test_SSfFeyx6ytVg0B")
+GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -102,6 +103,36 @@ def haversine(lat1, lon1, lat2, lon2):
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     return R * 2 * math.asin(math.sqrt(a))
+
+def resolve_place_id(place_id: str) -> dict:
+    """Resolve a Google Place ID to lat/lng/address using Places API (New)."""
+    if not GOOGLE_MAPS_API_KEY or not place_id:
+        return {}
+    try:
+        resp = http_requests.get(
+            f"https://places.googleapis.com/v1/places/{place_id}",
+            params={"languageCode": "en"},
+            headers={
+                "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+                "X-Goog-FieldMask": "displayName,formattedAddress,location",
+            },
+            timeout=5,
+        )
+        data = resp.json()
+        if resp.status_code == 200 and "location" in data:
+            loc = data["location"]
+            return {
+                "lat": loc.get("latitude"),
+                "lon": loc.get("longitude"),
+                "address": data.get("formattedAddress", ""),
+                "place_name": data.get("displayName", {}).get("text", ""),
+                "place_id": place_id,
+                "maps_url": f"https://www.google.com/maps/place/?q=place_id:{place_id}",
+            }
+        logger.warning(f"Place ID resolve failed: {data.get('error', {}).get('message', resp.text[:200])}")
+    except Exception as e:
+        logger.error(f"Place ID resolve error: {e}")
+    return {}
 
 # ── App ─────────────────────────────────────────────────────────────────
 app = FastAPI()
@@ -632,6 +663,7 @@ async def update_vendor_order_status(order_id: str, body: UpdateOrderStatusBody,
 # ── Vendor Payouts ──────────────────────────────────────────────────────
 
 COMMISSION_RATE = 0.15
+GST_ON_COMMISSION = 0.18
 
 @api.get("/vendor/payouts/summary")
 async def vendor_payouts_summary(request: Request):
@@ -709,6 +741,7 @@ class CreateVendorBody(BaseModel):
     email: str
     password: str
     location: Optional[dict] = None
+    place_id: Optional[str] = None
     logo_url: Optional[str] = None
     service_type: Optional[str] = "both"  # "dine_in", "takeaway", "both"
 
@@ -731,6 +764,16 @@ async def admin_vendors(request: Request):
     vendors = await db.vendors.find({}, {"_id": 0}).to_list(200)
     return vendors
 
+@api.get("/admin/place-lookup/{place_id}")
+async def admin_place_lookup(place_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    location = resolve_place_id(place_id)
+    if not location:
+        raise HTTPException(status_code=400, detail="Could not resolve Place ID. Check the ID and try again.")
+    return location
+
 @api.post("/admin/vendors")
 async def admin_create_vendor(body: CreateVendorBody, request: Request):
     user = await get_current_user(request)
@@ -742,7 +785,16 @@ async def admin_create_vendor(body: CreateVendorBody, request: Request):
 
     user_id = gen_id("user")
     vendor_id = gen_id("vendor")
-    location = body.location or {"lat": 12.9716, "lon": 77.5946, "address": "Bangalore"}
+
+    # Resolve location from place_id or use provided location
+    if body.place_id:
+        location = resolve_place_id(body.place_id)
+        if not location:
+            raise HTTPException(status_code=400, detail="Invalid Place ID or Google Maps API error")
+    elif body.location:
+        location = body.location
+    else:
+        location = {"lat": 12.9716, "lon": 77.5946, "address": "Bangalore"}
 
     await db.users.insert_one({
         "user_id": user_id,
