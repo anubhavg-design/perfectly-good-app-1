@@ -34,6 +34,7 @@ export default function AdminScreen() {
   const [vEmail, setVEmail] = useState('');
   const [vPassword, setVPassword] = useState('');
   const [vAddress, setVAddress] = useState('');
+  const [vServiceType, setVServiceType] = useState<'dine_in' | 'takeaway' | 'both'>('both');
   const [creating, setCreating] = useState(false);
 
   // Menu item form
@@ -79,9 +80,9 @@ export default function AdminScreen() {
     if (!vName || !vCategory || !vEmail || !vPassword) { Alert.alert('Error', 'Fill in all required fields'); return; }
     setCreating(true);
     try {
-      await adminApi.createVendor({ name: vName, category: vCategory, email: vEmail, password: vPassword, location: { lat: 12.9716, lon: 77.5946, address: vAddress || 'Bangalore' } });
+      await adminApi.createVendor({ name: vName, category: vCategory, email: vEmail, password: vPassword, location: { lat: 12.9716, lon: 77.5946, address: vAddress || 'Bangalore' }, service_type: vServiceType });
       Alert.alert('Success', 'Vendor created'); setShowCreateVendor(false);
-      setVName(''); setVCategory(''); setVEmail(''); setVPassword(''); setVAddress('');
+      setVName(''); setVCategory(''); setVEmail(''); setVPassword(''); setVAddress(''); setVServiceType('both');
       loadVendors();
     } catch (err: any) { Alert.alert('Error', err.message); } finally { setCreating(false); }
   };
@@ -167,6 +168,21 @@ export default function AdminScreen() {
                 <TextInput testID="vendor-email-input" style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textMuted} value={vEmail} onChangeText={setVEmail} keyboardType="email-address" autoCapitalize="none" />
                 <TextInput testID="vendor-password-input" style={styles.input} placeholder="Password" placeholderTextColor={COLORS.textMuted} value={vPassword} onChangeText={setVPassword} secureTextEntry />
                 <TextInput testID="vendor-address-input" style={styles.input} placeholder="Address" placeholderTextColor={COLORS.textMuted} value={vAddress} onChangeText={setVAddress} />
+                <Text style={styles.serviceLabel}>Service Type</Text>
+                <View style={styles.serviceRow}>
+                  {(['dine_in', 'takeaway', 'both'] as const).map((st) => (
+                    <TouchableOpacity
+                      key={st}
+                      testID={`service-type-${st}`}
+                      style={[styles.serviceChip, vServiceType === st && styles.serviceChipActive]}
+                      onPress={() => setVServiceType(st)}
+                    >
+                      <Text style={[styles.serviceChipText, vServiceType === st && styles.serviceChipTextActive]}>
+                        {st === 'dine_in' ? 'Dine In' : st === 'takeaway' ? 'Takeaway' : 'Both'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
                 <TouchableOpacity testID="create-vendor-submit" style={styles.primaryBtn} onPress={handleCreateVendor} disabled={creating}>
                   {creating ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Create Vendor</Text>}
                 </TouchableOpacity>
@@ -353,6 +369,13 @@ const styles = StyleSheet.create({
   emptyMenu: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textAlign: 'center', paddingVertical: SPACING.md },
   emptyState: { alignItems: 'center', paddingTop: 60 },
   emptyTitle: { fontSize: 18, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginTop: SPACING.md },
+  // Service type selector
+  serviceLabel: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.textPrimary, marginBottom: SPACING.xs },
+  serviceRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.sm },
+  serviceChip: { flex: 1, paddingVertical: SPACING.sm + 2, borderRadius: RADIUS.md, backgroundColor: COLORS.borderLight, alignItems: 'center' },
+  serviceChipActive: { backgroundColor: COLORS.primary },
+  serviceChipText: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  serviceChipTextActive: { color: '#fff', fontFamily: 'DMSans_700Bold' },
   // Payments styles
   payoutCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.md, ...SHADOWS.small },
   payoutHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SPACING.sm },

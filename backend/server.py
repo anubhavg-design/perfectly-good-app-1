@@ -395,8 +395,9 @@ async def create_order(body: CreateOrderBody, request: Request):
         raise HTTPException(status_code=400, detail="Not enough quantity available")
 
     subtotal = drop["discounted_price"] * body.quantity
-    fee = round(subtotal * 0.05)
-    total = subtotal + fee
+    gst = round(subtotal * 0.05, 2)
+    convenience_fee = round(subtotal * 0.03, 2)
+    total = round(subtotal + gst + convenience_fee, 2)
     amount_paise = int(total * 100)
 
     razorpay_order_id = f"order_{secrets.token_hex(12)}"
@@ -649,7 +650,9 @@ async def vendor_payouts_summary(request: Request):
         total_revenue += dp * o.get("quantity", 1)
     total_revenue = round(total_revenue, 2)
     total_commission = round(total_revenue * COMMISSION_RATE, 2)
-    net_earnings = round(total_revenue - total_commission, 2)
+    gst_on_commission = round(total_commission * GST_ON_COMMISSION, 2)
+    total_deductions = round(total_commission + gst_on_commission, 2)
+    net_earnings = round(total_revenue - total_deductions, 2)
     payouts = await db.payouts.find({"vendor_id": vid}, {"_id": 0}).to_list(10000)
     total_paid = round(sum(p.get("amount", 0) for p in payouts), 2)
     pending_payout = round(net_earnings - total_paid, 2)
@@ -657,6 +660,8 @@ async def vendor_payouts_summary(request: Request):
         "total_orders_completed": len(completed),
         "total_revenue": total_revenue,
         "total_commission": total_commission,
+        "gst_on_commission": gst_on_commission,
+        "total_deductions": total_deductions,
         "net_earnings": net_earnings,
         "total_paid": total_paid,
         "pending_payout": pending_payout,
@@ -680,13 +685,16 @@ async def vendor_payouts_orders(request: Request):
         qty = o.get("quantity", 1)
         line_total = round(dp * qty, 2)
         commission = round(line_total * COMMISSION_RATE, 2)
+        gst_on_comm = round(commission * GST_ON_COMMISSION, 2)
+        total_deduction = round(commission + gst_on_comm, 2)
         result.append({
             "order_id": o["order_id"],
             "food_item_name": o.get("food_item_name", ""),
             "quantity": qty,
             "discounted_price": dp,
-            "vendor_earning": round(line_total - commission, 2),
+            "vendor_earning": round(line_total - total_deduction, 2),
             "commission": commission,
+            "gst_on_commission": gst_on_comm,
             "created_at": o["created_at"].isoformat() if hasattr(o.get("created_at"), "isoformat") else str(o.get("created_at", "")),
         })
     return result
@@ -702,6 +710,7 @@ class CreateVendorBody(BaseModel):
     password: str
     location: Optional[dict] = None
     logo_url: Optional[str] = None
+    service_type: Optional[str] = "both"  # "dine_in", "takeaway", "both"
 
 class AddMenuItemBody(BaseModel):
     name: str
@@ -753,6 +762,7 @@ async def admin_create_vendor(body: CreateVendorBody, request: Request):
         "email": email,
         "location": location,
         "logo_url": body.logo_url or "",
+        "service_type": body.service_type or "both",
     }
     await db.vendors.insert_one(vendor_doc)
     vendor_doc.pop("_id", None)
@@ -851,7 +861,9 @@ async def admin_payouts_vendors(request: Request):
             total_revenue += dp * o.get("quantity", 1)
         total_revenue = round(total_revenue, 2)
         commission = round(total_revenue * COMMISSION_RATE, 2)
-        net_earnings = round(total_revenue - commission, 2)
+        gst_on_comm = round(commission * GST_ON_COMMISSION, 2)
+        total_deductions = round(commission + gst_on_comm, 2)
+        net_earnings = round(total_revenue - total_deductions, 2)
         payouts = await db.payouts.find({"vendor_id": vid}, {"_id": 0}).to_list(10000)
         total_paid = round(sum(p.get("amount", 0) for p in payouts), 2)
         result.append({

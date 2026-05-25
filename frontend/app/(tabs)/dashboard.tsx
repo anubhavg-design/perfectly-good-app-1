@@ -187,7 +187,7 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.earningRight}>
             <Text style={styles.earningAmount}>₹{item.vendor_earning}</Text>
-            <Text style={styles.earningComm}>-₹{item.commission} fee</Text>
+            <Text style={styles.earningComm}>-₹{item.commission} comm · -₹{item.gst_on_commission || 0} GST</Text>
           </View>
         </View>
       </View>
@@ -215,11 +215,11 @@ export default function DashboardScreen() {
             <Text style={[styles.summaryValue, { color: COLORS.accentUrgent }]}>₹{s.pending_payout.toLocaleString('en-IN')}</Text>
           </View>
         </View>
-        {/* Commission bar */}
+        {/* Deductions bar */}
         <View style={styles.commissionBar}>
           <IndianRupee size={14} color={COLORS.textSecondary} />
           <Text style={styles.commissionText}>
-            Revenue: ₹{s.total_revenue.toLocaleString('en-IN')}  ·  Commission (15%): ₹{s.total_commission.toLocaleString('en-IN')}
+            Revenue: ₹{s.total_revenue.toLocaleString('en-IN')}  ·  Commission (15%): ₹{s.total_commission.toLocaleString('en-IN')}  ·  GST on commission (18%): ₹{(s.gst_on_commission || 0).toLocaleString('en-IN')}
           </Text>
         </View>
         {earningsOrders.length > 0 && (

@@ -21,7 +21,10 @@
         "backgroundColor": "#2E7D32"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ],
       "package": "in.perfectlygood.app"
     },
     "web": {
@@ -40,7 +43,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#FDFBF7"
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
