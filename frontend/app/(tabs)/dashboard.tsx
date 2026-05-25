@@ -1,16 +1,16 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  ActivityIndicator, RefreshControl, Switch, Alert,
+  ActivityIndicator, RefreshControl, Switch, Alert, ScrollView, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee } from 'lucide-react-native';
+import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import { vendorApi } from '../../src/api/client';
 
-type TabType = 'drops' | 'orders' | 'earnings';
+type TabType = 'drops' | 'orders' | 'earnings' | 'settings';
 
 interface VendorDrop {
   item_id: string;
@@ -62,6 +62,11 @@ export default function DashboardScreen() {
   const [earningsOrders, setEarningsOrders] = useState<EarningsOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Settings state
+  const [vendorProfile, setVendorProfile] = useState<any>(null);
+  const [editAddress, setEditAddress] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -71,6 +76,11 @@ export default function DashboardScreen() {
       } else if (activeTab === 'orders') {
         const data = await vendorApi.orders();
         setOrders(data || []);
+      } else if (activeTab === 'settings') {
+        const profile = await vendorApi.profile();
+        setVendorProfile(profile);
+        setEditAddress(profile?.location?.address || '');
+        setEditPhone(profile?.phone || '');
       } else {
         const [summary, ords] = await Promise.all([
           vendorApi.payoutsSummary(),
@@ -271,12 +281,88 @@ export default function DashboardScreen() {
           <Wallet size={14} color={activeTab === 'earnings' ? COLORS.primary : COLORS.textMuted} />
           <Text style={[styles.tabText, activeTab === 'earnings' && styles.tabTextActive]}>Earnings</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          testID="tab-settings"
+          style={[styles.tab, activeTab === 'settings' && styles.tabActive]}
+          onPress={() => setActiveTab('settings')}
+        >
+          <Settings size={14} color={activeTab === 'settings' ? COLORS.primary : COLORS.textMuted} />
+          <Text style={[styles.tabText, activeTab === 'settings' && styles.tabTextActive]}>Settings</Text>
+        </TouchableOpacity>
       </View>
 
       {loading ? (
         <View style={styles.loader}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
+      ) : activeTab === 'settings' ? (
+        <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.settingsCard}>
+            <Text style={styles.settingsTitle}>Restaurant Details</Text>
+
+            <View style={styles.settingsField}>
+              <View style={styles.settingsLabelRow}>
+                <MapPin size={16} color={COLORS.textSecondary} />
+                <Text style={styles.settingsLabel}>Address</Text>
+              </View>
+              <TextInput
+                testID="settings-address"
+                style={styles.settingsInput}
+                value={editAddress}
+                onChangeText={setEditAddress}
+                placeholder="Full restaurant address"
+                placeholderTextColor={COLORS.textMuted}
+                multiline
+              />
+              <Text style={styles.settingsHint}>Address will be auto-geocoded for Google Maps</Text>
+            </View>
+
+            <View style={styles.settingsField}>
+              <View style={styles.settingsLabelRow}>
+                <Phone size={16} color={COLORS.textSecondary} />
+                <Text style={styles.settingsLabel}>Phone Number</Text>
+              </View>
+              <TextInput
+                testID="settings-phone"
+                style={styles.settingsInput}
+                value={editPhone}
+                onChangeText={setEditPhone}
+                placeholder="+91 98765 43210"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="phone-pad"
+              />
+            </View>
+
+            {vendorProfile?.location?.maps_url && (
+              <View style={styles.currentLocation}>
+                <MapPin size={14} color={COLORS.primary} />
+                <Text style={styles.currentLocationText} numberOfLines={2}>
+                  Current: {vendorProfile.location.address || 'Not set'}
+                </Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              testID="save-settings-btn"
+              style={[styles.saveBtn, saving && { opacity: 0.7 }]}
+              onPress={async () => {
+                setSaving(true);
+                try {
+                  const updated = await vendorApi.updateProfile({ address: editAddress || undefined, phone: editPhone || undefined });
+                  setVendorProfile(updated);
+                  Alert.alert('Saved', 'Your details have been updated');
+                } catch (err: any) {
+                  Alert.alert('Error', err.message);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              disabled={saving}
+            >
+              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       ) : activeTab === 'earnings' ? (
         <FlatList
           testID="earnings-list"
@@ -358,4 +444,16 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', paddingTop: 60 },
   emptyTitle: { fontSize: 18, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
   emptySubtitle: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: SPACING.xs, textAlign: 'center' },
+  // Settings styles
+  settingsCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.lg, ...SHADOWS.small },
+  settingsTitle: { fontSize: 18, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginBottom: SPACING.lg },
+  settingsField: { marginBottom: SPACING.md },
+  settingsLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: SPACING.xs },
+  settingsLabel: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.textPrimary },
+  settingsInput: { backgroundColor: COLORS.background, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, paddingVertical: 12, fontSize: 15, fontFamily: 'DMSans_400Regular', color: COLORS.textPrimary },
+  settingsHint: { fontSize: 11, fontFamily: 'DMSans_400Regular', color: COLORS.primary, marginTop: 4 },
+  currentLocation: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.primary + '10', borderRadius: RADIUS.md, padding: SPACING.sm, marginBottom: SPACING.md },
+  currentLocationText: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, flex: 1 },
+  saveBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 14, alignItems: 'center', marginTop: SPACING.sm },
+  saveBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Outfit_600SemiBold' },
 });

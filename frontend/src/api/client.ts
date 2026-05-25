@@ -167,6 +167,11 @@ export const vendorApi = {
   createDrop: (data: { menu_item_id: string; discounted_price: number; quantity_available: number; pickup_start_time: string; pickup_end_time: string }) =>
     apiFetch('/vendor/drops', { method: 'POST', body: JSON.stringify(data) }),
 
+  profile: () => apiFetch('/vendor/profile'),
+
+  updateProfile: (data: { address?: string; phone?: string }) =>
+    apiFetch('/vendor/profile', { method: 'PUT', body: JSON.stringify(data) }),
+
   payoutsSummary: () => apiFetch('/vendor/payouts/summary'),
 
   payoutsOrders: () => apiFetch('/vendor/payouts/orders'),
@@ -176,7 +181,7 @@ export const vendorApi = {
 export const adminApi = {
   vendors: () => apiFetch('/admin/vendors'),
 
-  createVendor: (data: { name: string; category: string; email: string; password: string; place_id?: string; location?: any; logo_url?: string; service_type?: string }) =>
+  createVendor: (data: { name: string; category: string; email: string; password: string; phone?: string; place_id?: string; location?: any; logo_url?: string; service_type?: string }) =>
     apiFetch('/admin/vendors', { method: 'POST', body: JSON.stringify(data) }),
 
   deleteVendor: (id: string) =>

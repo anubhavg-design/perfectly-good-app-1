@@ -557,6 +557,42 @@ class ToggleDropBody(BaseModel):
 class UpdateOrderStatusBody(BaseModel):
     status: str
 
+class UpdateVendorProfileBody(BaseModel):
+    address: Optional[str] = None
+    phone: Optional[str] = None
+
+@api.get("/vendor/profile")
+async def vendor_profile(request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    return vendor
+
+@api.put("/vendor/profile")
+async def update_vendor_profile(body: UpdateVendorProfileBody, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    updates = {}
+    if body.phone is not None:
+        updates["phone"] = body.phone
+    if body.address:
+        location = geocode_address(body.address)
+        if location:
+            updates["location"] = location
+        else:
+            updates["location"] = {"lat": 0, "lon": 0, "address": body.address, "maps_url": f"https://www.google.com/maps/search/?api=1&query={body.address.replace(' ', '+')}"}
+    if updates:
+        await db.vendors.update_one({"vendor_id": vendor["vendor_id"]}, {"$set": updates})
+    updated = await db.vendors.find_one({"vendor_id": vendor["vendor_id"]}, {"_id": 0})
+    return updated
+
 @api.get("/vendor/menu")
 async def vendor_menu(request: Request):
     user = await get_current_user(request)
@@ -742,6 +778,7 @@ class CreateVendorBody(BaseModel):
     category: str
     email: str
     password: str
+    phone: Optional[str] = ""
     location: Optional[dict] = None
     place_id: Optional[str] = None
     logo_url: Optional[str] = None
@@ -816,6 +853,7 @@ async def admin_create_vendor(body: CreateVendorBody, request: Request):
         "name": body.name,
         "category": body.category,
         "email": email,
+        "phone": body.phone or "",
         "location": location,
         "logo_url": body.logo_url or "",
         "service_type": body.service_type or "both",

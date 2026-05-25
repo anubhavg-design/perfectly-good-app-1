@@ -34,6 +34,7 @@ export default function AdminScreen() {
   const [vEmail, setVEmail] = useState('');
   const [vPassword, setVPassword] = useState('');
   const [vAddress, setVAddress] = useState('');
+  const [vPhone, setVPhone] = useState('');
   const [vServiceType, setVServiceType] = useState<'dine_in' | 'takeaway' | 'both'>('both');
   const [creating, setCreating] = useState(false);
 
@@ -80,9 +81,9 @@ export default function AdminScreen() {
     if (!vName || !vCategory || !vEmail || !vPassword) { Alert.alert('Error', 'Fill in all required fields'); return; }
     setCreating(true);
     try {
-      await adminApi.createVendor({ name: vName, category: vCategory, email: vEmail, password: vPassword, place_id: vAddress || undefined, service_type: vServiceType });
+      await adminApi.createVendor({ name: vName, category: vCategory, email: vEmail, password: vPassword, phone: vPhone || undefined, place_id: vAddress || undefined, service_type: vServiceType });
       Alert.alert('Success', 'Vendor created'); setShowCreateVendor(false);
-      setVName(''); setVCategory(''); setVEmail(''); setVPassword(''); setVAddress(''); setVServiceType('both');
+      setVName(''); setVCategory(''); setVEmail(''); setVPassword(''); setVAddress(''); setVPhone(''); setVServiceType('both');
       loadVendors();
     } catch (err: any) { Alert.alert('Error', err.message); } finally { setCreating(false); }
   };
@@ -167,6 +168,7 @@ export default function AdminScreen() {
                 <TextInput testID="vendor-category-input" style={styles.input} placeholder="Category" placeholderTextColor={COLORS.textMuted} value={vCategory} onChangeText={setVCategory} />
                 <TextInput testID="vendor-email-input" style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textMuted} value={vEmail} onChangeText={setVEmail} keyboardType="email-address" autoCapitalize="none" />
                 <TextInput testID="vendor-password-input" style={styles.input} placeholder="Password" placeholderTextColor={COLORS.textMuted} value={vPassword} onChangeText={setVPassword} secureTextEntry />
+                <TextInput testID="vendor-phone-input" style={styles.input} placeholder="Phone Number (e.g. +91 98765 43210)" placeholderTextColor={COLORS.textMuted} value={vPhone} onChangeText={setVPhone} keyboardType="phone-pad" />
                 <TextInput testID="vendor-address-input" style={styles.input} placeholder="Full restaurant address (e.g. 100 Feet Road, Koramangala, Bangalore)" placeholderTextColor={COLORS.textMuted} value={vAddress} onChangeText={setVAddress} />
                 <Text style={styles.addressHint}>Address will be auto-geocoded to show on Google Maps</Text>
                 <Text style={styles.serviceLabel}>Service Type</Text>
