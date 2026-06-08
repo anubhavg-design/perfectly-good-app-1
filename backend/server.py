@@ -357,13 +357,12 @@ async def list_drops(
 
     drops = await db.drops.find(query, {"_id": 0}).to_list(200)
 
-    # Enrich with vendor info
-    vendor_cache: dict = {}
+    # Enrich with vendor info (batch fetch to avoid N+1)
+    vendor_ids = list(set(d.get("vendor_id") for d in drops if d.get("vendor_id")))
+    vendors_list = await db.vendors.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(200) if vendor_ids else []
+    vendor_cache = {v["vendor_id"]: v for v in vendors_list}
     for drop in drops:
         vid = drop.get("vendor_id")
-        if vid and vid not in vendor_cache:
-            v = await db.vendors.find_one({"vendor_id": vid}, {"_id": 0})
-            vendor_cache[vid] = v
         v = vendor_cache.get(vid)
         if v:
             drop["vendor_name"] = v.get("name", "")
@@ -713,9 +712,13 @@ async def vendor_payouts_summary(request: Request):
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     vid = vendor["vendor_id"]
     completed = await db.orders.find({"vendor_id": vid, "status": "picked_up"}, {"_id": 0}).to_list(10000)
+    # Batch fetch drops to avoid N+1
+    food_item_ids = list(set(o.get("food_item_id") for o in completed if o.get("food_item_id")))
+    drops_list = await db.drops.find({"item_id": {"$in": food_item_ids}}, {"_id": 0, "item_id": 1, "discounted_price": 1}).to_list(10000) if food_item_ids else []
+    drops_map = {d["item_id"]: d for d in drops_list}
     total_revenue = 0
     for o in completed:
-        drop = await db.drops.find_one({"item_id": o.get("food_item_id")}, {"_id": 0, "discounted_price": 1})
+        drop = drops_map.get(o.get("food_item_id"))
         dp = drop["discounted_price"] if drop else o.get("total_amount", 0) / max(o.get("quantity", 1), 1)
         total_revenue += dp * o.get("quantity", 1)
     total_revenue = round(total_revenue, 2)
@@ -748,9 +751,13 @@ async def vendor_payouts_orders(request: Request):
     completed = await db.orders.find(
         {"vendor_id": vendor["vendor_id"], "status": "picked_up"}, {"_id": 0}
     ).sort("created_at", -1).to_list(500)
+    # Batch fetch drops to avoid N+1
+    food_item_ids = list(set(o.get("food_item_id") for o in completed if o.get("food_item_id")))
+    drops_list = await db.drops.find({"item_id": {"$in": food_item_ids}}, {"_id": 0, "item_id": 1, "discounted_price": 1}).to_list(500) if food_item_ids else []
+    drops_map = {d["item_id"]: d for d in drops_list}
     result = []
     for o in completed:
-        drop = await db.drops.find_one({"item_id": o.get("food_item_id")}, {"_id": 0, "discounted_price": 1})
+        drop = drops_map.get(o.get("food_item_id"))
         dp = drop["discounted_price"] if drop else o.get("total_amount", 0) / max(o.get("quantity", 1), 1)
         qty = o.get("quantity", 1)
         line_total = round(dp * qty, 2)
@@ -944,13 +951,31 @@ async def admin_payouts_vendors(request: Request):
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     vendors = await db.vendors.find({}, {"_id": 0}).to_list(200)
+    # Batch fetch all completed orders and drops to avoid N+1
+    all_orders = await db.orders.find({"status": "picked_up"}, {"_id": 0, "vendor_id": 1, "food_item_id": 1, "quantity": 1, "total_amount": 1}).to_list(100000)
+    all_food_item_ids = list(set(o.get("food_item_id") for o in all_orders if o.get("food_item_id")))
+    all_drops = await db.drops.find({"item_id": {"$in": all_food_item_ids}}, {"_id": 0, "item_id": 1, "discounted_price": 1}).to_list(10000) if all_food_item_ids else []
+    drops_map = {d["item_id"]: d for d in all_drops}
+    # Group orders by vendor
+    orders_by_vendor: dict = {}
+    for o in all_orders:
+        vid = o.get("vendor_id")
+        if vid:
+            orders_by_vendor.setdefault(vid, []).append(o)
+    # Batch fetch all payouts
+    all_payouts = await db.payouts.find({}, {"_id": 0, "vendor_id": 1, "amount": 1}).to_list(100000)
+    payouts_by_vendor: dict = {}
+    for p in all_payouts:
+        vid = p.get("vendor_id")
+        if vid:
+            payouts_by_vendor.setdefault(vid, []).append(p)
     result = []
     for v in vendors:
         vid = v["vendor_id"]
-        completed = await db.orders.find({"vendor_id": vid, "status": "picked_up"}, {"_id": 0}).to_list(10000)
+        completed = orders_by_vendor.get(vid, [])
         total_revenue = 0
         for o in completed:
-            drop = await db.drops.find_one({"item_id": o.get("food_item_id")}, {"_id": 0, "discounted_price": 1})
+            drop = drops_map.get(o.get("food_item_id"))
             dp = drop["discounted_price"] if drop else o.get("total_amount", 0) / max(o.get("quantity", 1), 1)
             total_revenue += dp * o.get("quantity", 1)
         total_revenue = round(total_revenue, 2)
@@ -958,8 +983,8 @@ async def admin_payouts_vendors(request: Request):
         gst_on_comm = round(commission * GST_ON_COMMISSION, 2)
         total_deductions = round(commission + gst_on_comm, 2)
         net_earnings = round(total_revenue - total_deductions, 2)
-        payouts = await db.payouts.find({"vendor_id": vid}, {"_id": 0}).to_list(10000)
-        total_paid = round(sum(p.get("amount", 0) for p in payouts), 2)
+        vendor_payouts = payouts_by_vendor.get(vid, [])
+        total_paid = round(sum(p.get("amount", 0) for p in vendor_payouts), 2)
         result.append({
             "vendor_id": vid,
             "vendor_name": v.get("name", ""),
