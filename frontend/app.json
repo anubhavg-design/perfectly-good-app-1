@@ -25,7 +25,7 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
       ],
-      "package": "in.perfectlygood.app"
+      "package": "in.perfectlygood.android"
     },
     "web": {
       "bundler": "metro",
