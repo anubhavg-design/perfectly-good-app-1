@@ -1,8 +1,38 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
-const EXPO_PUBLIC_API_URL = process.env.EXPO_PUBLIC_API_URL;
-const EXPO_PUBLIC_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-const API_BASE = EXPO_PUBLIC_API_URL || (EXPO_PUBLIC_BACKEND_URL ? `${EXPO_PUBLIC_BACKEND_URL}/api` : '/api');
+function resolveApiBase(): string {
+  const envApiUrl = process.env.EXPO_PUBLIC_API_URL;
+  const envBackendUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+
+  // Explicit full API URL takes highest priority
+  if (envApiUrl) return envApiUrl;
+
+  // Backend URL with /api suffix
+  if (envBackendUrl) return `${envBackendUrl}/api`;
+
+  // Try reading from Expo config extra (set via app.config.js)
+  const configBackendUrl = Constants.expoConfig?.extra?.backendUrl;
+  if (configBackendUrl) return `${configBackendUrl}/api`;
+
+  // On web, relative path works (same origin)
+  if (Platform.OS === 'web') return '/api';
+
+  // Native fallback: try to extract from Expo host URI
+  const hostUri = Constants.experienceUrl;
+  if (hostUri) {
+    try {
+      const url = new URL(hostUri);
+      return `${url.protocol}//${url.host}/api`;
+    } catch {}
+  }
+
+  // Last resort fallback for native - use /api (will show "Invalid URL" error)
+  return '/api';
+}
+
+const API_BASE = resolveApiBase();
 
 let accessToken: string | null = null;
 
