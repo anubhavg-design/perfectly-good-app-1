@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Search, SlidersHorizontal, MapPin, Clock, X } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, X, Tag } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi } from '../../src/api/client';
 import * as Location from 'expo-location';
@@ -45,6 +45,7 @@ interface Drop {
   vendor_location: { lat: number; lon: number; address: string };
   vendor_category: string;
   is_active: boolean;
+  expiry?: string;
 }
 
 export default function HomeScreen() {
@@ -156,6 +157,13 @@ export default function HomeScreen() {
               {item.vendor_location?.address || 'Nearby'}
             </Text>
           </View>
+
+          {item.expiry ? (
+            <View style={styles.expiryRow}>
+              <Tag size={12} color={COLORS.accentUrgent} />
+              <Text style={styles.expiryText}>Best before {item.expiry}</Text>
+            </View>
+          ) : null}
         </View>
       </TouchableOpacity>
     );
@@ -332,6 +340,8 @@ const styles = StyleSheet.create({
   originalPrice: { fontSize: 15, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textDecorationLine: 'line-through' },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   locationText: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, flex: 1 },
+  expiryRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: SPACING.xs },
+  expiryText: { fontSize: 12, fontFamily: 'DMSans_500Medium', color: COLORS.accentUrgent },
   emptyState: { alignItems: 'center', paddingTop: 80 },
   emptyTitle: { fontSize: 20, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginBottom: SPACING.xs },
   emptySubtitle: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary },
