@@ -136,6 +136,15 @@ export default function DropDetailScreen() {
                 <Text style={styles.infoValue}>{drop.pickup_start_time} — {drop.pickup_end_time}</Text>
               </View>
             </View>
+            {drop.expiry ? (
+              <View style={styles.infoRow}>
+                <Tag size={18} color={COLORS.accentUrgent} />
+                <View>
+                  <Text style={styles.infoLabel}>Best Before</Text>
+                  <Text style={styles.infoValue}>{drop.expiry}</Text>
+                </View>
+              </View>
+            ) : null}
             <TouchableOpacity
               testID="open-maps-btn"
               style={styles.infoRow}

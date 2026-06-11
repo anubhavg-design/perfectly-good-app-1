@@ -17,6 +17,8 @@ interface MenuItem {
   image_url: string;
 }
 
+const EXPIRY_OPTIONS = ['Today', 'Tomorrow', 'In 2 days', 'In 3 days'];
+
 export default function VendorCreateDropScreen() {
   const router = useRouter();
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -24,6 +26,7 @@ export default function VendorCreateDropScreen() {
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [discountedPrice, setDiscountedPrice] = useState('');
   const [quantity, setQuantity] = useState('');
+  const [expiry, setExpiry] = useState('');
   const [pickupStart, setPickupStart] = useState('');
   const [pickupEnd, setPickupEnd] = useState('');
   const [creating, setCreating] = useState(false);
@@ -44,7 +47,7 @@ export default function VendorCreateDropScreen() {
   };
 
   const handleCreate = async () => {
-    if (!selectedItem || !discountedPrice || !quantity || !pickupStart || !pickupEnd) {
+    if (!selectedItem || !discountedPrice || !quantity || !expiry || !pickupStart || !pickupEnd) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
@@ -61,6 +64,7 @@ export default function VendorCreateDropScreen() {
         quantity_available: Number(quantity),
         pickup_start_time: pickupStart,
         pickup_end_time: pickupEnd,
+        expiry,
       });
       Alert.alert('Success', 'Drop created successfully!', [
         { text: 'OK', onPress: () => router.back() },
@@ -153,6 +157,22 @@ export default function VendorCreateDropScreen() {
               />
             </View>
 
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Best Before / Expiry</Text>
+              <View style={styles.expiryRow}>
+                {EXPIRY_OPTIONS.map((opt) => (
+                  <TouchableOpacity
+                    key={opt}
+                    testID={`expiry-${opt}`}
+                    style={[styles.expiryChip, expiry === opt && styles.expiryChipSelected]}
+                    onPress={() => setExpiry(opt)}
+                  >
+                    <Text style={[styles.expiryChipText, expiry === opt && styles.expiryChipTextSelected]}>{opt}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
             <View style={styles.timeRow}>
               <View style={[styles.inputGroup, { flex: 1 }]}>
                 <Text style={styles.label}>Pickup Start (HH:MM)</Text>
@@ -230,6 +250,15 @@ const styles = StyleSheet.create({
   },
   hint: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, marginTop: 4 },
   timeRow: { flexDirection: 'row', gap: SPACING.md },
+  expiryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+  expiryChip: {
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    borderRadius: RADIUS.full, borderWidth: 1, borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  expiryChipSelected: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  expiryChipText: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  expiryChipTextSelected: { color: '#fff' },
   submitBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 16, alignItems: 'center', marginTop: SPACING.md },
   submitBtnDisabled: { opacity: 0.7 },
   submitBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Outfit_600SemiBold' },

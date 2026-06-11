@@ -15,7 +15,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../src/context/AuthContext';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
-import { Leaf, Eye, EyeOff } from 'lucide-react-native';
+import { Eye, EyeOff } from 'lucide-react-native';
 
 export default function AuthScreen() {
   const { user, loading, login, register } = useAuth();
@@ -23,6 +23,7 @@ export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -70,7 +71,7 @@ export default function AuthScreen() {
       if (isLogin) {
         await login(email.trim(), password);
       } else {
-        await register(name.trim(), email.trim(), password);
+        await register(name.trim(), email.trim(), phone.trim(), password);
       }
       router.replace('/(tabs)/home');
     } catch (err: any) {
@@ -98,13 +99,10 @@ export default function AuthScreen() {
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.logoRow}>
-              <View style={styles.logoIcon}>
-                <Leaf size={28} color={COLORS.surface} />
-              </View>
               <Text style={styles.logoText}>Perfectly Good</Text>
             </View>
             <Text style={styles.tagline}>
-              Rescue delicious food.{'\n'}Save money. Reduce waste.
+              Perfectly Good Food.{'\n'}Perfectly Low Prices
             </Text>
           </View>
 
@@ -163,6 +161,22 @@ export default function AuthScreen() {
                 autoCorrect={false}
               />
             </View>
+
+            {!isLogin && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Phone Number</Text>
+                <TextInput
+                  testID="phone-input"
+                  style={styles.input}
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="9876543210"
+                  placeholderTextColor={COLORS.textMuted}
+                  keyboardType="phone-pad"
+                  autoCorrect={false}
+                />
+              </View>
+            )}
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Password</Text>

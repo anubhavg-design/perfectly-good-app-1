@@ -36,6 +36,12 @@
 - Vendor 2: spicegarden@demo.com / vendor123 (Spice Garden, 3 menu items, 3 drops)
 - Total: 6 active drops, 6 menu items, 2 vendors
 
+## Recent Changes (June 2026)
+- Order pricing: GST 5% + Convenience 5% of subtotal (total = subtotal × 1.10). Percentages hidden from users in checkout breakdown.
+- Login page: removed leaf logo icon; tagline = "Perfectly Good Food. Perfectly Low Prices".
+- Signup now collects phone number (required, min 10 digits), stored on user; returned in user_response.
+- Vendor create-drop: added "Best Before / Expiry" selectable option (Today/Tomorrow/In 2 days/In 3 days), stored on drop, shown on drop detail.
+
 ## Screens (12 total)
 - Login/Register, Forgot Password
 - Home Feed (search + filters), Drop Detail, Checkout (Razorpay WebView)

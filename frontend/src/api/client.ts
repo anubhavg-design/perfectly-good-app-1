@@ -114,7 +114,7 @@ export class ApiError extends Error {
 
 // Auth endpoints
 export const authApi = {
-  register: async (data: { name: string; email: string; password: string }) => {
+  register: async (data: { name: string; email: string; phone: string; password: string }) => {
     const res = await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data), skipAuth: true });
     if (res?.access_token) {
       await setToken(res.access_token);
@@ -194,7 +194,7 @@ export const vendorApi = {
 
   menu: () => apiFetch('/vendor/menu'),
 
-  createDrop: (data: { menu_item_id: string; discounted_price: number; quantity_available: number; pickup_start_time: string; pickup_end_time: string }) =>
+  createDrop: (data: { menu_item_id: string; discounted_price: number; quantity_available: number; pickup_start_time: string; pickup_end_time: string; expiry?: string }) =>
     apiFetch('/vendor/drops', { method: 'POST', body: JSON.stringify(data) }),
 
   profile: () => apiFetch('/vendor/profile'),

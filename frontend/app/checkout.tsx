@@ -217,11 +217,11 @@ export default function CheckoutScreen() {
               <Text style={styles.priceValue}>₹{subtotal}</Text>
             </View>
             <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>GST (5%)</Text>
+              <Text style={styles.priceLabel}>GST</Text>
               <Text style={styles.priceValue}>₹{gst}</Text>
             </View>
             <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Convenience Fee (5%)</Text>
+              <Text style={styles.priceLabel}>Convenience Fee</Text>
               <Text style={styles.priceValue}>₹{convenienceFee}</Text>
             </View>
             <View style={styles.divider} />

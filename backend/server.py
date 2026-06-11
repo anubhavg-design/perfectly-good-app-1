@@ -70,6 +70,7 @@ def user_response(user: dict) -> dict:
         "user_id": user["user_id"],
         "email": user["email"],
         "name": user.get("name", ""),
+        "phone": user.get("phone", ""),
         "role": user.get("role", "user"),
         "picture": user.get("picture"),
         "location": user.get("location"),
@@ -147,6 +148,7 @@ api = APIRouter(prefix="/api")
 class RegisterBody(BaseModel):
     name: str
     email: str
+    phone: str
     password: str
 
 class LoginBody(BaseModel):
@@ -171,6 +173,9 @@ async def register(body: RegisterBody):
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
+    phone = (body.phone or "").strip()
+    if len(re.sub(r"\D", "", phone)) < 10:
+        raise HTTPException(status_code=400, detail="Please enter a valid phone number")
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
     user_id = gen_id("user")
@@ -178,6 +183,7 @@ async def register(body: RegisterBody):
         "user_id": user_id,
         "email": email,
         "name": body.name.strip(),
+        "phone": phone,
         "password_hash": hash_password(body.password),
         "role": "user",
         "picture": None,
@@ -549,6 +555,7 @@ class CreateDropBody(BaseModel):
     quantity_available: int
     pickup_start_time: str
     pickup_end_time: str
+    expiry: Optional[str] = None
 
 class ToggleDropBody(BaseModel):
     is_active: bool
@@ -641,6 +648,7 @@ async def create_vendor_drop(body: CreateDropBody, request: Request):
         "quantity_available": body.quantity_available,
         "pickup_start_time": body.pickup_start_time,
         "pickup_end_time": body.pickup_end_time,
+        "expiry": (body.expiry or "").strip(),
         "image_url": menu_item.get("image_url", ""),
         "is_active": True,
         "created_at": datetime.now(timezone.utc),
