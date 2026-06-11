@@ -235,7 +235,21 @@ test_plan:
   test_all: true
   test_priority: "high_first"
 
+  - task: "Order pricing: GST 5% + Convenience 5%"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Changed convenience fee from 3% to 5% (GST already 5%). create_order now charges subtotal + 5% GST + 5% convenience. Verify amount = subtotal*1.10 in Razorpay order."
+
 agent_communication:
+    - agent: "main"
+      message: "NEW: Updated order pricing - GST 5% (unchanged) + convenience fee changed 3%->5%. Verify POST /api/orders/create returns amount in paise = round(subtotal*1.10)*100. Also verify frontend login + drops browsing flows. Credentials: Vendor vendor@demo.com/vendor123, Admin anubhavg@perfectlygood.in/Anubhavv."
     - agent: "main"
       message: "Fixed deployment blockers: 1) Resized all app icons to square (1024x1024), 2) Removed hardcoded production URL from client.ts - now uses EXPO_PUBLIC_BACKEND_URL env var, 3) Fixed .gitignore blocking .env files, 4) Optimized 4 N+1 database queries in payout endpoints. Need to verify backend APIs and frontend login still work correctly. Test credentials: Admin - anubhavg@perfectlygood.in/Anubhavv, Vendor - vendor@demo.com/vendor123. Backend at localhost:8001/api, Frontend at localhost:3000."
     - agent: "testing"

@@ -33,7 +33,7 @@ export default function CheckoutScreen() {
   const maxQty = Number(params.maxQty);
   const subtotal = price * quantity;
   const gst = Math.round(subtotal * 0.05);
-  const convenienceFee = Math.round(subtotal * 0.03);
+  const convenienceFee = Math.round(subtotal * 0.05);
   const total = subtotal + gst + convenienceFee;
   const totalSavings = (originalPrice - price) * quantity;
 
@@ -221,7 +221,7 @@ export default function CheckoutScreen() {
               <Text style={styles.priceValue}>₹{gst}</Text>
             </View>
             <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Convenience Fee</Text>
+              <Text style={styles.priceLabel}>Convenience Fee (5%)</Text>
               <Text style={styles.priceValue}>₹{convenienceFee}</Text>
             </View>
             <View style={styles.divider} />

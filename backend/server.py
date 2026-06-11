@@ -428,7 +428,7 @@ async def create_order(body: CreateOrderBody, request: Request):
 
     subtotal = drop["discounted_price"] * body.quantity
     gst = round(subtotal * 0.05, 2)
-    convenience_fee = round(subtotal * 0.03, 2)
+    convenience_fee = round(subtotal * 0.05, 2)
     total = round(subtotal + gst + convenience_fee, 2)
     amount_paise = int(total * 100)
 
