@@ -2,7 +2,7 @@
   "expo": {
     "name": "Perfectly Good",
     "slug": "perfectly-good",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "perfectly-good",
@@ -16,6 +16,7 @@
       }
     },
     "android": {
+      "versionCode": 105,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
