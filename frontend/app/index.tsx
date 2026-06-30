@@ -31,7 +31,8 @@ export default function AuthScreen() {
 
   React.useEffect(() => {
     if (!loading && user) {
-      router.replace('/(tabs)/home');
+      const staff = ['admin', 'operations', 'customer_success', 'finance'];
+      router.replace(staff.includes((user as any).role) ? '/ops' : '/(tabs)/home');
     }
   }, [user, loading]);
 
@@ -69,11 +70,13 @@ export default function AuthScreen() {
     setSubmitting(true);
     try {
       if (isLogin) {
-        await login(email.trim(), password);
+        const u = await login(email.trim(), password);
+        const staff = ['admin', 'operations', 'customer_success', 'finance'];
+        router.replace(u && staff.includes((u as any).role) ? '/ops' : '/(tabs)/home');
       } else {
         await register(name.trim(), email.trim(), phone.trim(), password);
+        router.replace('/(tabs)/home');
       }
-      router.replace('/(tabs)/home');
     } catch (err: any) {
       if (err.message && err.message.includes('fetch')) {
         setError('Unable to connect to server. Please check your internet connection.');

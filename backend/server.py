@@ -66,12 +66,15 @@ def create_refresh_token(user_id: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 def user_response(user: dict) -> dict:
+    role = user.get("role", "user")
     return {
         "user_id": user["user_id"],
         "email": user["email"],
         "name": user.get("name", ""),
         "phone": user.get("phone", ""),
-        "role": user.get("role", "user"),
+        "role": role,
+        "permissions": sorted(get_effective_permissions(role, user.get("permission_overrides"))),
+        "permission_overrides": user.get("permission_overrides") or {},
         "picture": user.get("picture"),
         "location": user.get("location"),
         "created_at": user.get("created_at", datetime.now(timezone.utc)).isoformat(),
@@ -97,6 +100,86 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+# ── RBAC ────────────────────────────────────────────────────────────────
+STAFF_ROLES = {"admin", "operations", "customer_success", "finance"}
+
+PERMISSIONS = [
+    "view_dashboard", "view_vendors", "manage_vendors",
+    "manage_menu", "upload_images", "ai_import",
+    "view_orders", "update_order_status", "manage_orders",
+    "view_finance", "manage_payouts",
+    "view_users", "manage_users",
+    "manage_settings", "manage_roles", "add_notes",
+]
+
+ROLE_PERMISSIONS = {
+    "user": set(),
+    "vendor": {"manage_menu", "view_orders", "update_order_status", "view_finance"},
+    "admin": set(PERMISSIONS),
+    "operations": {
+        "view_dashboard", "view_vendors", "manage_vendors", "manage_menu",
+        "upload_images", "ai_import", "view_orders", "update_order_status",
+        "manage_orders", "add_notes",
+    },
+    "customer_success": {
+        "view_dashboard", "view_vendors", "view_orders", "update_order_status", "add_notes",
+    },
+    "finance": {
+        "view_dashboard", "view_vendors", "view_finance", "view_orders",
+        "manage_payouts",
+    },
+}
+
+
+def get_effective_permissions(role: str, overrides: Optional[dict] = None) -> set:
+    perms = set(ROLE_PERMISSIONS.get(role, set()))
+    if overrides:
+        for perm, allowed in overrides.items():
+            if allowed:
+                perms.add(perm)
+            else:
+                perms.discard(perm)
+    return perms
+
+
+async def require_permission(request: Request, permission: str) -> dict:
+    """Authenticate and ensure the current user has the given permission."""
+    user = await get_current_user(request)
+    perms = get_effective_permissions(user.get("role", "user"), user.get("permission_overrides"))
+    if permission not in perms:
+        raise HTTPException(status_code=403, detail=f"Insufficient permissions (requires '{permission}')")
+    return user
+
+
+# ── Platform settings ───────────────────────────────────────────────────
+DEFAULT_SETTINGS = {
+    "commission_rate": 0.15,
+    "gst_on_commission": 0.18,
+    "gst_rate": 0.05,
+    "convenience_rate": 0.05,
+    "default_discount_pct": 40,
+    "categories": ["Bakery", "Restaurant", "Cafe", "Grocery", "Sweets", "Cloud Kitchen", "Dessert"],
+    "pickup_slots": ["12:00-15:00", "15:00-18:00", "17:00-20:00", "18:00-21:00", "19:00-22:00"],
+    "service_types": ["takeaway", "dine_in", "both"],
+}
+
+
+async def get_settings_doc() -> dict:
+    doc = await db.settings.find_one({"_id": "platform"})
+    if not doc:
+        doc = {"_id": "platform", **DEFAULT_SETTINGS}
+        await db.settings.insert_one(doc)
+        return doc
+    changed = {}
+    for k, v in DEFAULT_SETTINGS.items():
+        if k not in doc:
+            changed[k] = v
+    if changed:
+        await db.settings.update_one({"_id": "platform"}, {"$set": changed})
+        doc.update(changed)
+    return doc
+
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371
@@ -340,6 +423,24 @@ async def get_categories():
     categories = await db.vendors.distinct("category")
     return categories or []
 
+def item_to_drop(item: dict, vendor: Optional[dict]) -> dict:
+    """Shape a menu_item (+ its vendor) into the legacy drop response used by the app."""
+    out = dict(item)
+    out["item_id"] = item.get("menu_item_id")
+    out["is_active"] = bool(item.get("available_today"))
+    if vendor:
+        out["vendor_name"] = vendor.get("name", "")
+        out["vendor_location"] = vendor.get("location", {})
+        out["vendor_category"] = vendor.get("category", "")
+        out["pickup_start_time"] = vendor.get("pickup_start_time", "")
+        out["pickup_end_time"] = vendor.get("pickup_end_time", "")
+        out["service_type"] = vendor.get("service_type", "both")
+    for k in ("created_at", "updated_at"):
+        if k in out and hasattr(out[k], "isoformat"):
+            out[k] = out[k].isoformat()
+    return out
+
+
 @api.get("/drops")
 async def list_drops(
     lat: Optional[float] = None,
@@ -349,33 +450,25 @@ async def list_drops(
     max_price: Optional[float] = None,
     sort_by: Optional[str] = None,
 ):
-    query: dict = {"is_active": True}
+    # Only items toggled available today, from active vendors
+    active_vendor_ids = await db.vendors.distinct("vendor_id", {"status": {"$ne": "inactive"}})
+    query: dict = {"available_today": True, "vendor_id": {"$in": active_vendor_ids}}
     if search:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
             {"description": {"$regex": search, "$options": "i"}},
         ]
     if category:
-        vendor_ids = await db.vendors.distinct("vendor_id", {"category": category})
-        query["vendor_id"] = {"$in": vendor_ids}
+        cat_vendor_ids = await db.vendors.distinct("vendor_id", {"category": category})
+        query["vendor_id"] = {"$in": [v for v in active_vendor_ids if v in set(cat_vendor_ids)]}
     if max_price:
         query["discounted_price"] = {"$lte": max_price}
 
-    drops = await db.drops.find(query, {"_id": 0}).to_list(200)
-
-    # Enrich with vendor info (batch fetch to avoid N+1)
-    vendor_ids = list(set(d.get("vendor_id") for d in drops if d.get("vendor_id")))
-    vendors_list = await db.vendors.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(200) if vendor_ids else []
+    items = await db.menu_items.find(query, {"_id": 0}).to_list(500)
+    vendor_ids = list(set(i.get("vendor_id") for i in items if i.get("vendor_id")))
+    vendors_list = await db.vendors.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(500) if vendor_ids else []
     vendor_cache = {v["vendor_id"]: v for v in vendors_list}
-    for drop in drops:
-        vid = drop.get("vendor_id")
-        v = vendor_cache.get(vid)
-        if v:
-            drop["vendor_name"] = v.get("name", "")
-            drop["vendor_location"] = v.get("location", {})
-            drop["vendor_category"] = v.get("category", "")
-        if "created_at" in drop and hasattr(drop["created_at"], "isoformat"):
-            drop["created_at"] = drop["created_at"].isoformat()
+    drops = [item_to_drop(i, vendor_cache.get(i.get("vendor_id"))) for i in items]
 
     if sort_by == "price":
         drops.sort(key=lambda d: d.get("discounted_price", 0))
@@ -384,10 +477,7 @@ async def list_drops(
     elif lat and lon:
         for d in drops:
             vloc = d.get("vendor_location", {})
-            if vloc and vloc.get("lat") and vloc.get("lon"):
-                d["_dist"] = haversine(lat, lon, vloc["lat"], vloc["lon"])
-            else:
-                d["_dist"] = 99999
+            d["_dist"] = haversine(lat, lon, vloc["lat"], vloc["lon"]) if vloc and vloc.get("lat") and vloc.get("lon") else 99999
         drops.sort(key=lambda d: d.get("_dist", 99999))
         for d in drops:
             d.pop("_dist", None)
@@ -396,17 +486,11 @@ async def list_drops(
 
 @api.get("/drops/{item_id}")
 async def get_drop(item_id: str, lat: Optional[float] = None, lon: Optional[float] = None):
-    drop = await db.drops.find_one({"item_id": item_id}, {"_id": 0})
-    if not drop:
-        raise HTTPException(status_code=404, detail="Drop not found")
-    v = await db.vendors.find_one({"vendor_id": drop.get("vendor_id")}, {"_id": 0})
-    if v:
-        drop["vendor_name"] = v.get("name", "")
-        drop["vendor_location"] = v.get("location", {})
-        drop["vendor_category"] = v.get("category", "")
-    if "created_at" in drop and hasattr(drop["created_at"], "isoformat"):
-        drop["created_at"] = drop["created_at"].isoformat()
-    return drop
+    item = await db.menu_items.find_one({"menu_item_id": item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    vendor = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
+    return item_to_drop(item, vendor)
 
 # ══════════════════════════════════════════════════════════════════════════
 #  ORDERS
@@ -426,15 +510,17 @@ class VerifyOrderBody(BaseModel):
 @api.post("/orders/create")
 async def create_order(body: CreateOrderBody, request: Request):
     user = await get_current_user(request)
-    drop = await db.drops.find_one({"item_id": body.food_item_id, "is_active": True}, {"_id": 0})
-    if not drop:
-        raise HTTPException(status_code=404, detail="Drop not found or inactive")
-    if body.quantity > drop["quantity_available"]:
+    item = await db.menu_items.find_one({"menu_item_id": body.food_item_id, "available_today": True}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not available")
+    qty_avail = item.get("quantity_available")
+    if qty_avail is not None and body.quantity > qty_avail:
         raise HTTPException(status_code=400, detail="Not enough quantity available")
 
-    subtotal = drop["discounted_price"] * body.quantity
-    gst = round(subtotal * 0.05, 2)
-    convenience_fee = round(subtotal * 0.05, 2)
+    cfg = await get_settings_doc()
+    subtotal = item["discounted_price"] * body.quantity
+    gst = round(subtotal * cfg.get("gst_rate", 0.05), 2)
+    convenience_fee = round(subtotal * cfg.get("convenience_rate", 0.05), 2)
     total = round(subtotal + gst + convenience_fee, 2)
     amount_paise = int(total * 100)
 
@@ -445,6 +531,7 @@ async def create_order(body: CreateOrderBody, request: Request):
         "user_id": user["user_id"],
         "food_item_id": body.food_item_id,
         "quantity": body.quantity,
+        "item_subtotal": round(subtotal, 2),
         "total_amount": total,
         "created_at": datetime.now(timezone.utc),
     })
@@ -462,11 +549,11 @@ async def verify_order(body: VerifyOrderBody, request: Request):
     if not pending:
         raise HTTPException(status_code=400, detail="Order not found")
 
-    drop = await db.drops.find_one({"item_id": body.food_item_id}, {"_id": 0})
-    if not drop:
-        raise HTTPException(status_code=404, detail="Drop not found")
+    item = await db.menu_items.find_one({"menu_item_id": body.food_item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
 
-    vendor = await db.vendors.find_one({"vendor_id": drop.get("vendor_id")}, {"_id": 0})
+    vendor = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
 
     order_id = gen_id("order")
     order_doc = {
@@ -474,32 +561,36 @@ async def verify_order(body: VerifyOrderBody, request: Request):
         "user_id": user["user_id"],
         "user_name": user.get("name", ""),
         "food_item_id": body.food_item_id,
-        "food_item_name": drop.get("name", ""),
-        "vendor_id": drop.get("vendor_id", ""),
+        "food_item_name": item.get("name", ""),
+        "vendor_id": item.get("vendor_id", ""),
         "vendor_name": vendor.get("name", "") if vendor else "",
         "quantity": body.quantity,
+        "discounted_price": item.get("discounted_price", 0),
+        "item_subtotal": pending.get("item_subtotal", round(item.get("discounted_price", 0) * body.quantity, 2)),
         "total_amount": pending.get("total_amount", 0),
         "status": "reserved",
-        "pickup_start_time": drop.get("pickup_start_time", ""),
-        "pickup_end_time": drop.get("pickup_end_time", ""),
+        "pickup_start_time": vendor.get("pickup_start_time", "") if vendor else "",
+        "pickup_end_time": vendor.get("pickup_end_time", "") if vendor else "",
         "razorpay_order_id": body.razorpay_order_id,
         "razorpay_payment_id": body.razorpay_payment_id,
         "created_at": datetime.now(timezone.utc),
     }
     await db.orders.insert_one(order_doc)
 
-    # Decrement available quantity
-    await db.drops.update_one(
-        {"item_id": body.food_item_id},
-        {"$inc": {"quantity_available": -body.quantity}},
-    )
+    # Decrement available quantity (if tracked)
+    if item.get("quantity_available") is not None:
+        await db.menu_items.update_one(
+            {"menu_item_id": body.food_item_id},
+            {"$inc": {"quantity_available": -body.quantity}},
+        )
+    await db.vendors.update_one({"vendor_id": item.get("vendor_id", "")}, {"$set": {"last_order_date": datetime.now(timezone.utc)}})
     await db.pending_orders.delete_one({"razorpay_order_id": body.razorpay_order_id})
 
     # Send push notification to vendor
     await send_push_to_vendor(
-        vendor_id=drop.get("vendor_id", ""),
+        vendor_id=item.get("vendor_id", ""),
         title="New Order!",
-        body=f"{user.get('name', 'A customer')} reserved {body.quantity}× {drop.get('name', 'item')} — ₹{pending.get('total_amount', 0)}",
+        body=f"{user.get('name', 'A customer')} reserved {body.quantity}× {item.get('name', 'item')} — ₹{pending.get('total_amount', 0)}",
         data={"order_id": order_id, "type": "new_order"},
     )
 
@@ -538,11 +629,12 @@ async def cancel_user_order(order_id: str, request: Request):
     if order["status"] != "reserved":
         raise HTTPException(status_code=400, detail="Only reserved orders can be cancelled")
     await db.orders.update_one({"order_id": order_id}, {"$set": {"status": "cancelled"}})
-    # Restore drop quantity
-    await db.drops.update_one(
-        {"item_id": order.get("food_item_id")},
-        {"$inc": {"quantity_available": order.get("quantity", 0)}},
-    )
+    # Restore item quantity (if tracked)
+    if order.get("quantity"):
+        await db.menu_items.update_one(
+            {"menu_item_id": order.get("food_item_id"), "quantity_available": {"$ne": None}},
+            {"$inc": {"quantity_available": order.get("quantity", 0)}},
+        )
     return {"message": "Order cancelled"}
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -618,11 +710,8 @@ async def vendor_drops(request: Request):
     vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
-    drops = await db.drops.find({"vendor_id": vendor["vendor_id"]}, {"_id": 0}).to_list(200)
-    for d in drops:
-        if "created_at" in d and hasattr(d["created_at"], "isoformat"):
-            d["created_at"] = d["created_at"].isoformat()
-    return drops
+    items = await db.menu_items.find({"vendor_id": vendor["vendor_id"]}, {"_id": 0}).to_list(500)
+    return [item_to_drop(i, vendor) for i in items]
 
 @api.post("/vendor/drops")
 async def create_vendor_drop(body: CreateDropBody, request: Request):
@@ -636,46 +725,35 @@ async def create_vendor_drop(body: CreateDropBody, request: Request):
     if not menu_item:
         raise HTTPException(status_code=404, detail="Menu item not found")
 
-    item_id = gen_id("item")
-    drop_doc = {
-        "item_id": item_id,
-        "vendor_id": vendor["vendor_id"],
-        "menu_item_id": body.menu_item_id,
-        "name": menu_item["name"],
-        "description": menu_item.get("description", ""),
-        "original_price": menu_item["original_price"],
+    updates = {
         "discounted_price": body.discounted_price,
         "quantity_available": body.quantity_available,
-        "pickup_start_time": body.pickup_start_time,
-        "pickup_end_time": body.pickup_end_time,
         "expiry": (body.expiry or "").strip(),
-        "image_url": menu_item.get("image_url", ""),
-        "is_active": True,
-        "created_at": datetime.now(timezone.utc),
+        "available_today": True,
+        "updated_at": datetime.now(timezone.utc),
     }
-    await db.drops.insert_one(drop_doc)
-    drop_doc.pop("_id", None)
-    if hasattr(drop_doc.get("created_at"), "isoformat"):
-        drop_doc["created_at"] = drop_doc["created_at"].isoformat()
+    await db.menu_items.update_one({"menu_item_id": body.menu_item_id}, {"$set": updates})
+    updated = await db.menu_items.find_one({"menu_item_id": body.menu_item_id}, {"_id": 0})
 
     # Notify all users about the new listing
-    discount = round(((menu_item["original_price"] - body.discounted_price) / menu_item["original_price"]) * 100)
+    op = menu_item.get("original_price") or 0
+    discount = round(((op - body.discounted_price) / op) * 100) if op else 0
     await send_push_to_all_users(
         title=f"{vendor.get('name', 'A vendor')} just dropped!",
-        body=f"{menu_item['name']} — ₹{body.discounted_price} ({discount}% off). Pickup {body.pickup_start_time}–{body.pickup_end_time}",
-        data={"item_id": item_id, "type": "new_drop"},
+        body=f"{menu_item['name']} — ₹{body.discounted_price} ({discount}% off)",
+        data={"item_id": body.menu_item_id, "type": "new_drop"},
     )
 
-    return drop_doc
+    return item_to_drop(updated, vendor)
 
 @api.put("/vendor/drops/{item_id}")
 async def toggle_vendor_drop(item_id: str, body: ToggleDropBody, request: Request):
     user = await get_current_user(request)
     if user["role"] not in ("vendor", "admin"):
         raise HTTPException(status_code=403, detail="Not a vendor")
-    result = await db.drops.update_one({"item_id": item_id}, {"$set": {"is_active": body.is_active}})
+    result = await db.menu_items.update_one({"menu_item_id": item_id}, {"$set": {"available_today": body.is_active, "updated_at": datetime.now(timezone.utc)}})
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Drop not found")
+        raise HTTPException(status_code=404, detail="Item not found")
     return {"message": "Updated", "is_active": body.is_active}
 
 @api.get("/vendor/orders")
@@ -710,6 +788,15 @@ async def update_vendor_order_status(order_id: str, body: UpdateOrderStatusBody,
 COMMISSION_RATE = 0.15
 GST_ON_COMMISSION = 0.18
 
+
+def order_revenue(o: dict) -> float:
+    """Pre-tax item revenue for an order (price at time of sale)."""
+    if o.get("item_subtotal") is not None:
+        return round(o["item_subtotal"], 2)
+    if o.get("discounted_price") is not None:
+        return round(o["discounted_price"] * o.get("quantity", 1), 2)
+    return round(o.get("total_amount", 0) / 1.10, 2)
+
 @api.get("/vendor/payouts/summary")
 async def vendor_payouts_summary(request: Request):
     user = await get_current_user(request)
@@ -720,18 +807,10 @@ async def vendor_payouts_summary(request: Request):
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     vid = vendor["vendor_id"]
     completed = await db.orders.find({"vendor_id": vid, "status": "picked_up"}, {"_id": 0}).to_list(10000)
-    # Batch fetch drops to avoid N+1
-    food_item_ids = list(set(o.get("food_item_id") for o in completed if o.get("food_item_id")))
-    drops_list = await db.drops.find({"item_id": {"$in": food_item_ids}}, {"_id": 0, "item_id": 1, "discounted_price": 1}).to_list(10000) if food_item_ids else []
-    drops_map = {d["item_id"]: d for d in drops_list}
-    total_revenue = 0
-    for o in completed:
-        drop = drops_map.get(o.get("food_item_id"))
-        dp = drop["discounted_price"] if drop else o.get("total_amount", 0) / max(o.get("quantity", 1), 1)
-        total_revenue += dp * o.get("quantity", 1)
-    total_revenue = round(total_revenue, 2)
-    total_commission = round(total_revenue * COMMISSION_RATE, 2)
-    gst_on_commission = round(total_commission * GST_ON_COMMISSION, 2)
+    cfg = await get_settings_doc()
+    total_revenue = round(sum(order_revenue(o) for o in completed), 2)
+    total_commission = round(total_revenue * cfg["commission_rate"], 2)
+    gst_on_commission = round(total_commission * cfg["gst_on_commission"], 2)
     total_deductions = round(total_commission + gst_on_commission, 2)
     net_earnings = round(total_revenue - total_deductions, 2)
     payouts = await db.payouts.find({"vendor_id": vid}, {"_id": 0}).to_list(10000)
@@ -759,18 +838,14 @@ async def vendor_payouts_orders(request: Request):
     completed = await db.orders.find(
         {"vendor_id": vendor["vendor_id"], "status": "picked_up"}, {"_id": 0}
     ).sort("created_at", -1).to_list(500)
-    # Batch fetch drops to avoid N+1
-    food_item_ids = list(set(o.get("food_item_id") for o in completed if o.get("food_item_id")))
-    drops_list = await db.drops.find({"item_id": {"$in": food_item_ids}}, {"_id": 0, "item_id": 1, "discounted_price": 1}).to_list(500) if food_item_ids else []
-    drops_map = {d["item_id"]: d for d in drops_list}
+    cfg = await get_settings_doc()
     result = []
     for o in completed:
-        drop = drops_map.get(o.get("food_item_id"))
-        dp = drop["discounted_price"] if drop else o.get("total_amount", 0) / max(o.get("quantity", 1), 1)
         qty = o.get("quantity", 1)
-        line_total = round(dp * qty, 2)
-        commission = round(line_total * COMMISSION_RATE, 2)
-        gst_on_comm = round(commission * GST_ON_COMMISSION, 2)
+        line_total = order_revenue(o)
+        dp = round(line_total / max(qty, 1), 2)
+        commission = round(line_total * cfg["commission_rate"], 2)
+        gst_on_comm = round(commission * cfg["gst_on_commission"], 2)
         total_deduction = round(commission + gst_on_comm, 2)
         result.append({
             "order_id": o["order_id"],
@@ -959,11 +1034,8 @@ async def admin_payouts_vendors(request: Request):
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     vendors = await db.vendors.find({}, {"_id": 0}).to_list(200)
-    # Batch fetch all completed orders and drops to avoid N+1
-    all_orders = await db.orders.find({"status": "picked_up"}, {"_id": 0, "vendor_id": 1, "food_item_id": 1, "quantity": 1, "total_amount": 1}).to_list(100000)
-    all_food_item_ids = list(set(o.get("food_item_id") for o in all_orders if o.get("food_item_id")))
-    all_drops = await db.drops.find({"item_id": {"$in": all_food_item_ids}}, {"_id": 0, "item_id": 1, "discounted_price": 1}).to_list(10000) if all_food_item_ids else []
-    drops_map = {d["item_id"]: d for d in all_drops}
+    cfg = await get_settings_doc()
+    all_orders = await db.orders.find({"status": "picked_up"}, {"_id": 0, "vendor_id": 1, "item_subtotal": 1, "discounted_price": 1, "quantity": 1, "total_amount": 1}).to_list(100000)
     # Group orders by vendor
     orders_by_vendor: dict = {}
     for o in all_orders:
@@ -981,14 +1053,9 @@ async def admin_payouts_vendors(request: Request):
     for v in vendors:
         vid = v["vendor_id"]
         completed = orders_by_vendor.get(vid, [])
-        total_revenue = 0
-        for o in completed:
-            drop = drops_map.get(o.get("food_item_id"))
-            dp = drop["discounted_price"] if drop else o.get("total_amount", 0) / max(o.get("quantity", 1), 1)
-            total_revenue += dp * o.get("quantity", 1)
-        total_revenue = round(total_revenue, 2)
-        commission = round(total_revenue * COMMISSION_RATE, 2)
-        gst_on_comm = round(commission * GST_ON_COMMISSION, 2)
+        total_revenue = round(sum(order_revenue(o) for o in completed), 2)
+        commission = round(total_revenue * cfg["commission_rate"], 2)
+        gst_on_comm = round(commission * cfg["gst_on_commission"], 2)
         total_deductions = round(commission + gst_on_comm, 2)
         net_earnings = round(total_revenue - total_deductions, 2)
         vendor_payouts = payouts_by_vendor.get(vid, [])
@@ -1027,6 +1094,674 @@ async def admin_upload(file: UploadFile = File(...), request: Request = None):
     with open(upload_path, "wb") as f:
         f.write(contents)
     return {"url": f"/uploads/{filename}", "filename": filename}
+
+# ══════════════════════════════════════════════════════════════════════════
+#  OPS DASHBOARD (internal operations team)
+# ══════════════════════════════════════════════════════════════════════════
+
+class OpsVendorBody(BaseModel):
+    name: str
+    owner_name: Optional[str] = ""
+    email: str
+    password: Optional[str] = None
+    phone: Optional[str] = ""
+    restaurant_phone: Optional[str] = ""
+    category: str = "Restaurant"
+    full_address: Optional[str] = ""
+    maps_link: Optional[str] = ""
+    service_type: Optional[str] = "both"
+    pickup_start_time: Optional[str] = "18:00"
+    pickup_end_time: Optional[str] = "21:00"
+    status: Optional[str] = "active"
+    assigned_ops: Optional[str] = ""
+
+class OpsMenuItemBody(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    original_price: float
+    discounted_price: Optional[float] = None
+    category: Optional[str] = ""
+    serving_size: Optional[str] = ""
+    food_type: Optional[str] = "veg"
+    contains_egg: Optional[bool] = False
+    available_today: Optional[bool] = False
+    quantity_available: Optional[int] = None
+    image_url: Optional[str] = ""
+
+class VendorNoteBody(BaseModel):
+    note: str
+
+class MarkPaidBody(BaseModel):
+    vendor_id: str
+    amount: float
+    reference_number: Optional[str] = ""
+    notes: Optional[str] = ""
+    method: Optional[str] = "bank_transfer"
+
+class StaffBody(BaseModel):
+    name: str
+    email: str
+    password: Optional[str] = None
+    role: str
+    permission_overrides: Optional[dict] = None
+
+class AvailabilityBody(BaseModel):
+    available_today: bool
+
+
+def _month_start(now: datetime) -> datetime:
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+def _day_start(now: datetime) -> datetime:
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+@api.get("/ops/dashboard/stats")
+async def ops_dashboard_stats(request: Request):
+    await require_permission(request, "view_dashboard")
+    cfg = await get_settings_doc()
+    now = datetime.now(timezone.utc)
+    day0, week0, month0 = _day_start(now), _day_start(now) - timedelta(days=7), _month_start(now)
+
+    total_vendors = await db.vendors.count_documents({})
+    active_vendors = await db.vendors.count_documents({"status": {"$ne": "inactive"}})
+    pending_vendors = await db.vendors.count_documents({"status": "pending"})
+    live_items = await db.menu_items.count_documents({"available_today": True})
+
+    orders_today = await db.orders.count_documents({"created_at": {"$gte": day0}, "status": {"$ne": "cancelled"}})
+    orders_week = await db.orders.count_documents({"created_at": {"$gte": week0}, "status": {"$ne": "cancelled"}})
+
+    today_orders = await db.orders.find({"created_at": {"$gte": day0}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(100000)
+    month_orders = await db.orders.find({"created_at": {"$gte": month0}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(100000)
+    revenue_today = round(sum(order_revenue(o) for o in today_orders), 2)
+    revenue_month = round(sum(order_revenue(o) for o in month_orders), 2)
+
+    completed = await db.orders.find({"status": "picked_up"}, {"_id": 0}).to_list(100000)
+    commission_earned = round(sum(order_revenue(o) for o in completed) * cfg["commission_rate"], 2)
+
+    # pending payouts across all vendors
+    net_total = 0.0
+    by_vendor: dict = {}
+    for o in completed:
+        by_vendor.setdefault(o.get("vendor_id"), 0.0)
+        by_vendor[o.get("vendor_id")] += order_revenue(o)
+    paid_rows = await db.payouts.find({}, {"_id": 0, "vendor_id": 1, "amount": 1}).to_list(100000)
+    paid_by_vendor: dict = {}
+    for p in paid_rows:
+        paid_by_vendor[p.get("vendor_id")] = paid_by_vendor.get(p.get("vendor_id"), 0.0) + p.get("amount", 0)
+    pending_payouts = 0.0
+    for vid, rev in by_vendor.items():
+        commission = rev * cfg["commission_rate"]
+        net = rev - commission - (commission * cfg["gst_on_commission"])
+        pending_payouts += max(net - paid_by_vendor.get(vid, 0.0), 0)
+
+    return {
+        "total_vendors": total_vendors,
+        "active_vendors": active_vendors,
+        "pending_vendors": pending_vendors,
+        "live_menu_items": live_items,
+        "orders_today": orders_today,
+        "orders_week": orders_week,
+        "revenue_today": revenue_today,
+        "revenue_month": revenue_month,
+        "commission_earned": commission_earned,
+        "pending_payouts": round(pending_payouts, 2),
+    }
+
+
+async def _vendor_aggregates(vendor_ids: list) -> dict:
+    """Return {vendor_id: {menu_count, order_count, revenue}}."""
+    agg = {vid: {"menu_count": 0, "order_count": 0, "revenue": 0.0} for vid in vendor_ids}
+    menu = await db.menu_items.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0, "vendor_id": 1}).to_list(100000)
+    for m in menu:
+        if m["vendor_id"] in agg:
+            agg[m["vendor_id"]]["menu_count"] += 1
+    orders = await db.orders.find({"vendor_id": {"$in": vendor_ids}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(100000)
+    for o in orders:
+        vid = o.get("vendor_id")
+        if vid in agg:
+            agg[vid]["order_count"] += 1
+            agg[vid]["revenue"] += order_revenue(o)
+    for vid in agg:
+        agg[vid]["revenue"] = round(agg[vid]["revenue"], 2)
+    return agg
+
+
+@api.get("/ops/vendors")
+async def ops_list_vendors(request: Request, search: Optional[str] = None, category: Optional[str] = None,
+                           status: Optional[str] = None, page: int = 1, page_size: int = 25):
+    await require_permission(request, "view_vendors")
+    query: dict = {}
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+            {"phone": {"$regex": search, "$options": "i"}},
+        ]
+    if category:
+        query["category"] = category
+    if status:
+        query["status"] = status
+    total = await db.vendors.count_documents(query)
+    skip = max(page - 1, 0) * page_size
+    vendors = await db.vendors.find(query, {"_id": 0}).sort("name", 1).skip(skip).limit(page_size).to_list(page_size)
+    agg = await _vendor_aggregates([v["vendor_id"] for v in vendors])
+    for v in vendors:
+        a = agg.get(v["vendor_id"], {})
+        v["menu_count"] = a.get("menu_count", 0)
+        v["order_count"] = a.get("order_count", 0)
+        v["revenue"] = a.get("revenue", 0)
+        for k in ("created_at", "updated_at", "last_order_date"):
+            if isinstance(v.get(k), datetime):
+                v[k] = v[k].isoformat()
+    return {"items": vendors, "total": total, "page": page, "page_size": page_size}
+
+
+@api.post("/ops/vendors")
+async def ops_create_vendor(body: OpsVendorBody, request: Request):
+    await require_permission(request, "manage_vendors")
+    email = body.email.strip().lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email already exists")
+    location = {}
+    if body.full_address:
+        location = geocode_address(body.full_address) or {
+            "lat": 0, "lon": 0, "address": body.full_address,
+            "maps_url": body.maps_link or f"https://www.google.com/maps/search/?api=1&query={body.full_address.replace(' ', '+')}",
+        }
+    if body.maps_link:
+        location["maps_url"] = body.maps_link
+    user_id = gen_id("user")
+    vendor_id = gen_id("vendor")
+    await db.users.insert_one({
+        "user_id": user_id, "email": email, "name": body.name,
+        "phone": body.phone or "",
+        "password_hash": hash_password(body.password or secrets.token_urlsafe(8)),
+        "role": "vendor", "picture": None, "location": location,
+        "created_at": datetime.now(timezone.utc),
+    })
+    now = datetime.now(timezone.utc)
+    vendor_doc = {
+        "vendor_id": vendor_id, "user_id": user_id, "name": body.name,
+        "owner_name": body.owner_name or "", "category": body.category, "email": email,
+        "phone": body.phone or "", "restaurant_phone": body.restaurant_phone or "",
+        "full_address": body.full_address or "", "maps_link": body.maps_link or "",
+        "location": location, "logo_url": "", "service_type": body.service_type or "both",
+        "pickup_start_time": body.pickup_start_time or "18:00", "pickup_end_time": body.pickup_end_time or "21:00",
+        "status": body.status or "active", "assigned_ops": body.assigned_ops or "",
+        "notes": [], "created_at": now, "updated_at": now, "last_order_date": None,
+    }
+    await db.vendors.insert_one(vendor_doc)
+    vendor_doc.pop("_id", None)
+    for k in ("created_at", "updated_at"):
+        vendor_doc[k] = vendor_doc[k].isoformat()
+    return vendor_doc
+
+
+@api.get("/ops/vendors/{vendor_id}")
+async def ops_vendor_detail(vendor_id: str, request: Request):
+    await require_permission(request, "view_vendors")
+    cfg = await get_settings_doc()
+    v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    menu = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(1000)
+    for m in menu:
+        for k in ("created_at", "updated_at"):
+            if isinstance(m.get(k), datetime):
+                m[k] = m[k].isoformat()
+    orders = await db.orders.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(100000)
+    completed = [o for o in orders if o.get("status") == "picked_up"]
+    revenue = round(sum(order_revenue(o) for o in completed), 2)
+    commission = round(revenue * cfg["commission_rate"], 2)
+    payouts = await db.payouts.find({"vendor_id": vendor_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    for p in payouts:
+        if isinstance(p.get("created_at"), datetime):
+            p["created_at"] = p["created_at"].isoformat()
+    total_paid = round(sum(p.get("amount", 0) for p in payouts), 2)
+    net = round(revenue - commission - (commission * cfg["gst_on_commission"]), 2)
+    for k in ("created_at", "updated_at", "last_order_date"):
+        if isinstance(v.get(k), datetime):
+            v[k] = v[k].isoformat()
+    v["menu_items"] = menu
+    v["total_orders"] = len([o for o in orders if o.get("status") != "cancelled"])
+    v["completed_orders"] = len(completed)
+    v["revenue"] = revenue
+    v["commission"] = commission
+    v["net_payable"] = net
+    v["total_paid"] = total_paid
+    v["pending_payout"] = round(net - total_paid, 2)
+    v["payout_history"] = payouts
+    return v
+
+
+@api.put("/ops/vendors/{vendor_id}")
+async def ops_update_vendor(vendor_id: str, body: OpsVendorBody, request: Request):
+    await require_permission(request, "manage_vendors")
+    v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    updates = {
+        "name": body.name, "owner_name": body.owner_name or "", "category": body.category,
+        "phone": body.phone or "", "restaurant_phone": body.restaurant_phone or "",
+        "full_address": body.full_address or "", "maps_link": body.maps_link or "",
+        "service_type": body.service_type or "both", "pickup_start_time": body.pickup_start_time or "18:00",
+        "pickup_end_time": body.pickup_end_time or "21:00", "status": body.status or "active",
+        "assigned_ops": body.assigned_ops or "", "updated_at": datetime.now(timezone.utc),
+    }
+    if body.full_address and body.full_address != v.get("full_address"):
+        loc = geocode_address(body.full_address)
+        if loc:
+            if body.maps_link:
+                loc["maps_url"] = body.maps_link
+            updates["location"] = loc
+    await db.vendors.update_one({"vendor_id": vendor_id}, {"$set": updates})
+    if body.name or body.phone:
+        await db.users.update_one({"user_id": v.get("user_id")}, {"$set": {"name": body.name, "phone": body.phone or ""}})
+    return {"message": "Vendor updated"}
+
+
+@api.put("/ops/vendors/{vendor_id}/status")
+async def ops_vendor_status(vendor_id: str, body: dict, request: Request):
+    await require_permission(request, "manage_vendors")
+    status = body.get("status", "active")
+    result = await db.vendors.update_one({"vendor_id": vendor_id}, {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"message": "Status updated", "status": status}
+
+
+@api.delete("/ops/vendors/{vendor_id}")
+async def ops_delete_vendor(vendor_id: str, request: Request):
+    await require_permission(request, "manage_vendors")
+    vendor = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    await db.vendors.delete_one({"vendor_id": vendor_id})
+    await db.users.delete_one({"user_id": vendor.get("user_id")})
+    await db.menu_items.delete_many({"vendor_id": vendor_id})
+    return {"message": "Vendor deleted"}
+
+
+@api.post("/ops/vendors/{vendor_id}/notes")
+async def ops_add_note(vendor_id: str, body: VendorNoteBody, request: Request):
+    user = await require_permission(request, "add_notes")
+    note = {"note": body.note, "by": user.get("name", "Staff"), "at": datetime.now(timezone.utc).isoformat()}
+    result = await db.vendors.update_one({"vendor_id": vendor_id}, {"$push": {"notes": note}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return note
+
+
+@api.get("/ops/vendors/{vendor_id}/menu")
+async def ops_vendor_menu(vendor_id: str, request: Request):
+    await require_permission(request, "view_vendors")
+    items = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(1000)
+    for m in items:
+        for k in ("created_at", "updated_at"):
+            if isinstance(m.get(k), datetime):
+                m[k] = m[k].isoformat()
+    return items
+
+
+@api.post("/ops/vendors/{vendor_id}/menu")
+async def ops_add_menu_item(vendor_id: str, body: OpsMenuItemBody, request: Request):
+    await require_permission(request, "manage_menu")
+    vendor = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    cfg = await get_settings_doc()
+    dp = body.discounted_price
+    if dp is None:
+        dp = round(body.original_price * (1 - cfg["default_discount_pct"] / 100), 2)
+    now = datetime.now(timezone.utc)
+    doc = {
+        "menu_item_id": gen_id("menu"), "vendor_id": vendor_id, "name": body.name,
+        "description": body.description or "", "original_price": body.original_price,
+        "discounted_price": dp, "category": body.category or vendor.get("category", ""),
+        "serving_size": body.serving_size or "", "food_type": body.food_type or "veg",
+        "contains_egg": bool(body.contains_egg), "available_today": bool(body.available_today),
+        "quantity_available": body.quantity_available,
+        "image_url": body.image_url or "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600",
+        "created_at": now, "updated_at": now,
+    }
+    await db.menu_items.insert_one(doc)
+    doc.pop("_id", None)
+    for k in ("created_at", "updated_at"):
+        doc[k] = doc[k].isoformat()
+    return doc
+
+
+@api.put("/ops/menu/{menu_item_id}")
+async def ops_update_menu_item(menu_item_id: str, body: OpsMenuItemBody, request: Request):
+    await require_permission(request, "manage_menu")
+    updates = {
+        "name": body.name, "description": body.description or "", "original_price": body.original_price,
+        "category": body.category or "", "serving_size": body.serving_size or "",
+        "food_type": body.food_type or "veg", "contains_egg": bool(body.contains_egg),
+        "available_today": bool(body.available_today), "updated_at": datetime.now(timezone.utc),
+    }
+    if body.discounted_price is not None:
+        updates["discounted_price"] = body.discounted_price
+    if body.quantity_available is not None:
+        updates["quantity_available"] = body.quantity_available
+    if body.image_url:
+        updates["image_url"] = body.image_url
+    result = await db.menu_items.update_one({"menu_item_id": menu_item_id}, {"$set": updates})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    return {"message": "Menu item updated"}
+
+
+@api.post("/ops/menu/{menu_item_id}/duplicate")
+async def ops_duplicate_menu_item(menu_item_id: str, request: Request):
+    await require_permission(request, "manage_menu")
+    item = await db.menu_items.find_one({"menu_item_id": menu_item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    now = datetime.now(timezone.utc)
+    item["menu_item_id"] = gen_id("menu")
+    item["name"] = f"{item.get('name', 'Item')} (Copy)"
+    item["available_today"] = False
+    item["created_at"] = now
+    item["updated_at"] = now
+    await db.menu_items.insert_one(item)
+    item.pop("_id", None)
+    for k in ("created_at", "updated_at"):
+        item[k] = item[k].isoformat()
+    return item
+
+
+@api.delete("/ops/menu/{menu_item_id}")
+async def ops_delete_menu_item(menu_item_id: str, request: Request):
+    await require_permission(request, "manage_menu")
+    result = await db.menu_items.delete_one({"menu_item_id": menu_item_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    return {"message": "Menu item deleted"}
+
+
+@api.put("/ops/menu/{menu_item_id}/availability")
+async def ops_toggle_availability(menu_item_id: str, body: AvailabilityBody, request: Request):
+    await require_permission(request, "manage_menu")
+    result = await db.menu_items.update_one(
+        {"menu_item_id": menu_item_id},
+        {"$set": {"available_today": body.available_today, "updated_at": datetime.now(timezone.utc)}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    return {"message": "Updated", "available_today": body.available_today}
+
+
+@api.get("/ops/orders")
+async def ops_list_orders(request: Request, range: Optional[str] = None, vendor_id: Optional[str] = None,
+                          status: Optional[str] = None, page: int = 1, page_size: int = 25):
+    await require_permission(request, "view_orders")
+    cfg = await get_settings_doc()
+    query: dict = {}
+    now = datetime.now(timezone.utc)
+    if range == "today":
+        query["created_at"] = {"$gte": _day_start(now)}
+    elif range == "week":
+        query["created_at"] = {"$gte": _day_start(now) - timedelta(days=7)}
+    if vendor_id:
+        query["vendor_id"] = vendor_id
+    if status:
+        query["status"] = status
+    total = await db.orders.count_documents(query)
+    skip = max(page - 1, 0) * page_size
+    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(page_size).to_list(page_size)
+    for o in orders:
+        o["commission"] = round(order_revenue(o) * cfg["commission_rate"], 2)
+        o["order_value"] = o.get("total_amount", 0)
+        o["customer_name"] = o.get("user_name", "Customer")
+        if isinstance(o.get("created_at"), datetime):
+            o["created_at"] = o["created_at"].isoformat()
+    return {"items": orders, "total": total, "page": page, "page_size": page_size}
+
+
+@api.put("/ops/orders/{order_id}/status")
+async def ops_update_order_status(order_id: str, body: dict, request: Request):
+    await require_permission(request, "update_order_status")
+    status = body.get("status")
+    if status not in ("reserved", "picked_up", "cancelled", "expired"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+    result = await db.orders.update_one({"order_id": order_id}, {"$set": {"status": status}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return {"message": "Status updated", "status": status}
+
+
+@api.get("/ops/users")
+async def ops_list_users(request: Request, search: Optional[str] = None, page: int = 1, page_size: int = 25):
+    await require_permission(request, "view_users")
+    query: dict = {"role": "user"}
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+            {"phone": {"$regex": search, "$options": "i"}},
+        ]
+    total = await db.users.count_documents(query)
+    skip = max(page - 1, 0) * page_size
+    users = await db.users.find(query, {"_id": 0, "password_hash": 0}).sort("created_at", -1).skip(skip).limit(page_size).to_list(page_size)
+    # aggregate orders + money saved
+    uids = [u["user_id"] for u in users]
+    orders = await db.orders.find({"user_id": {"$in": uids}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(100000)
+    items = await db.menu_items.find({}, {"_id": 0, "menu_item_id": 1, "original_price": 1}).to_list(100000)
+    orig_map = {i["menu_item_id"]: i.get("original_price", 0) for i in items}
+    by_user: dict = {}
+    for o in orders:
+        d = by_user.setdefault(o.get("user_id"), {"orders": 0, "saved": 0.0})
+        d["orders"] += 1
+        orig = orig_map.get(o.get("food_item_id"), 0) * o.get("quantity", 1)
+        d["saved"] += max(orig - order_revenue(o), 0)
+    for u in users:
+        d = by_user.get(u["user_id"], {"orders": 0, "saved": 0})
+        u["orders"] = d["orders"]
+        u["money_saved"] = round(d["saved"], 2)
+        if isinstance(u.get("created_at"), datetime):
+            u["created_at"] = u["created_at"].isoformat()
+    return {"items": users, "total": total, "page": page, "page_size": page_size}
+
+
+@api.get("/ops/payouts")
+async def ops_payouts(request: Request, period: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None):
+    await require_permission(request, "view_finance")
+    cfg = await get_settings_doc()
+    now = datetime.now(timezone.utc)
+    order_q: dict = {"status": "picked_up"}
+    if period == "weekly":
+        order_q["created_at"] = {"$gte": _day_start(now) - timedelta(days=7)}
+    elif period == "monthly":
+        order_q["created_at"] = {"$gte": _month_start(now)}
+    elif start and end:
+        try:
+            order_q["created_at"] = {"$gte": datetime.fromisoformat(start), "$lte": datetime.fromisoformat(end)}
+        except Exception:
+            pass
+    vendors = await db.vendors.find({}, {"_id": 0}).to_list(2000)
+    completed = await db.orders.find(order_q, {"_id": 0}).to_list(200000)
+    all_completed = await db.orders.find({"status": "picked_up"}, {"_id": 0}).to_list(200000)
+    pending_q = await db.orders.find({"status": "reserved"}, {"_id": 0, "vendor_id": 1}).to_list(200000)
+    rev_by_vendor: dict = {}
+    for o in completed:
+        rev_by_vendor.setdefault(o.get("vendor_id"), {"rev": 0.0, "count": 0})
+        rev_by_vendor[o.get("vendor_id")]["rev"] += order_revenue(o)
+        rev_by_vendor[o.get("vendor_id")]["count"] += 1
+    all_net_by_vendor: dict = {}
+    for o in all_completed:
+        all_net_by_vendor.setdefault(o.get("vendor_id"), 0.0)
+        all_net_by_vendor[o.get("vendor_id")] += order_revenue(o)
+    pending_orders_by_vendor: dict = {}
+    for o in pending_q:
+        pending_orders_by_vendor[o.get("vendor_id")] = pending_orders_by_vendor.get(o.get("vendor_id"), 0) + 1
+    payouts = await db.payouts.find({}, {"_id": 0}).to_list(200000)
+    paid_by_vendor: dict = {}
+    last_payout: dict = {}
+    for p in payouts:
+        vid = p.get("vendor_id")
+        paid_by_vendor[vid] = paid_by_vendor.get(vid, 0.0) + p.get("amount", 0)
+        ca = p.get("created_at")
+        if isinstance(ca, datetime):
+            if vid not in last_payout or ca > last_payout[vid]:
+                last_payout[vid] = ca
+    result = []
+    for v in vendors:
+        vid = v["vendor_id"]
+        rv = rev_by_vendor.get(vid, {"rev": 0.0, "count": 0})
+        total_sales = round(rv["rev"], 2)
+        commission = round(total_sales * cfg["commission_rate"], 2)
+        gst_on_comm = round(commission * cfg["gst_on_commission"], 2)
+        net_payable = round(total_sales - commission - gst_on_comm, 2)
+        all_net = round(all_net_by_vendor.get(vid, 0.0) * (1 - cfg["commission_rate"] * (1 + cfg["gst_on_commission"])), 2)
+        paid = round(paid_by_vendor.get(vid, 0.0), 2)
+        pending_amt = round(all_net - paid, 2)
+        result.append({
+            "vendor_id": vid, "vendor_name": v.get("name", ""),
+            "total_sales": total_sales, "commission": commission, "gst_on_commission": gst_on_comm,
+            "net_payable": net_payable, "completed_orders": rv["count"],
+            "pending_orders": pending_orders_by_vendor.get(vid, 0),
+            "last_payout_date": last_payout[vid].isoformat() if vid in last_payout else None,
+            "total_paid": paid, "pending_payout": pending_amt,
+            "status": "paid" if pending_amt <= 0 and paid > 0 else ("pending" if pending_amt > 0 else "no_dues"),
+        })
+    result.sort(key=lambda r: r["pending_payout"], reverse=True)
+    return result
+
+
+@api.get("/ops/payouts/{vendor_id}/history")
+async def ops_payout_history(vendor_id: str, request: Request):
+    await require_permission(request, "view_finance")
+    payouts = await db.payouts.find({"vendor_id": vendor_id}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for p in payouts:
+        if isinstance(p.get("created_at"), datetime):
+            p["created_at"] = p["created_at"].isoformat()
+    return payouts
+
+
+@api.post("/ops/payouts/mark-paid")
+async def ops_mark_paid(body: MarkPaidBody, request: Request):
+    user = await require_permission(request, "manage_payouts")
+    vendor = await db.vendors.find_one({"vendor_id": body.vendor_id}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    payout_doc = {
+        "payout_id": gen_id("payout"), "vendor_id": body.vendor_id,
+        "vendor_name": vendor.get("name", ""), "amount": round(body.amount, 2),
+        "reference_number": body.reference_number or "", "notes": body.notes or "",
+        "method": body.method or "bank_transfer", "status": "paid",
+        "paid_by": user.get("name", "Staff"), "created_at": datetime.now(timezone.utc),
+    }
+    await db.payouts.insert_one(payout_doc)
+    payout_doc.pop("_id", None)
+    payout_doc["created_at"] = payout_doc["created_at"].isoformat()
+    return payout_doc
+
+
+@api.get("/ops/settings")
+async def ops_get_settings(request: Request):
+    await require_permission(request, "view_dashboard")
+    cfg = await get_settings_doc()
+    cfg.pop("_id", None)
+    return cfg
+
+
+@api.put("/ops/settings")
+async def ops_update_settings(body: dict, request: Request):
+    await require_permission(request, "manage_settings")
+    allowed = set(DEFAULT_SETTINGS.keys())
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if updates:
+        await db.settings.update_one({"_id": "platform"}, {"$set": updates}, upsert=True)
+    cfg = await get_settings_doc()
+    cfg.pop("_id", None)
+    return cfg
+
+
+@api.get("/ops/roles")
+async def ops_roles(request: Request):
+    await require_permission(request, "view_dashboard")
+    return {"permissions": PERMISSIONS, "roles": {r: sorted(p) for r, p in ROLE_PERMISSIONS.items() if r in STAFF_ROLES}}
+
+
+@api.get("/ops/staff")
+async def ops_list_staff(request: Request):
+    await require_permission(request, "manage_roles")
+    staff = await db.users.find({"role": {"$in": list(STAFF_ROLES)}}, {"_id": 0, "password_hash": 0}).to_list(500)
+    for s in staff:
+        if isinstance(s.get("created_at"), datetime):
+            s["created_at"] = s["created_at"].isoformat()
+        s["permissions"] = sorted(get_effective_permissions(s.get("role", "user"), s.get("permission_overrides")))
+    return staff
+
+
+@api.post("/ops/staff")
+async def ops_create_staff(body: StaffBody, request: Request):
+    await require_permission(request, "manage_roles")
+    if body.role not in STAFF_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    email = body.email.strip().lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email already exists")
+    doc = {
+        "user_id": gen_id("user"), "email": email, "name": body.name,
+        "password_hash": hash_password(body.password or secrets.token_urlsafe(8)),
+        "role": body.role, "permission_overrides": body.permission_overrides or {},
+        "picture": None, "location": None, "created_at": datetime.now(timezone.utc),
+    }
+    await db.users.insert_one(doc)
+    return {"message": "Staff created", "user_id": doc["user_id"], "email": email}
+
+
+@api.put("/ops/staff/{user_id}/role")
+async def ops_update_staff_role(user_id: str, body: dict, request: Request):
+    await require_permission(request, "manage_roles")
+    role = body.get("role")
+    if role not in STAFF_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    updates = {"role": role}
+    if "permission_overrides" in body:
+        updates["permission_overrides"] = body["permission_overrides"] or {}
+    result = await db.users.update_one({"user_id": user_id}, {"$set": updates})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "Role updated", "role": role}
+
+
+@api.delete("/ops/staff/{user_id}")
+async def ops_delete_staff(user_id: str, request: Request):
+    me = await require_permission(request, "manage_roles")
+    if me["user_id"] == user_id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target or target.get("role") not in STAFF_ROLES:
+        raise HTTPException(status_code=404, detail="Staff member not found")
+    await db.users.delete_one({"user_id": user_id})
+    return {"message": "Staff removed"}
+
+
+@api.get("/ops/search")
+async def ops_search(request: Request, q: str):
+    await require_permission(request, "view_vendors")
+    rx = {"$regex": q, "$options": "i"}
+    vendors = await db.vendors.find({"$or": [{"name": rx}, {"email": rx}, {"phone": rx}]}, {"_id": 0, "vendor_id": 1, "name": 1, "category": 1, "status": 1}).limit(10).to_list(10)
+    customers = await db.users.find({"role": "user", "$or": [{"name": rx}, {"email": rx}, {"phone": rx}]}, {"_id": 0, "user_id": 1, "name": 1, "email": 1}).limit(10).to_list(10)
+    items = await db.menu_items.find({"name": rx}, {"_id": 0, "menu_item_id": 1, "name": 1, "vendor_id": 1}).limit(10).to_list(10)
+    orders = await db.orders.find({"$or": [{"order_id": rx}, {"user_name": rx}, {"vendor_name": rx}]}, {"_id": 0, "order_id": 1, "user_name": 1, "vendor_name": 1, "status": 1}).limit(10).to_list(10)
+    return {"vendors": vendors, "customers": customers, "menu_items": items, "orders": orders}
+
+
+@api.post("/ops/upload")
+async def ops_upload(file: UploadFile = File(...), request: Request = None):
+    if request:
+        await require_permission(request, "upload_images")
+    contents = await file.read()
+    import base64 as _b64
+    mime = file.content_type or "image/jpeg"
+    data_uri = f"data:{mime};base64,{_b64.b64encode(contents).decode('utf-8')}"
+    return {"url": data_uri}
+
 
 # ── Health ──────────────────────────────────────────────────────────────
 @api.get("/")
@@ -1205,10 +1940,110 @@ async def seed_data():
     await db.orders.create_index("vendor_id")
     logger.info("Database indexes created")
 
+# ── Migration & staff seeding ───────────────────────────────────────────
+STAFF_SEED = [
+    {"email": "operations@perfectlygood.in", "password": "ops12345", "role": "operations", "name": "Ops Team"},
+    {"email": "success@perfectlygood.in", "password": "success12345", "role": "customer_success", "name": "Customer Success"},
+    {"email": "finance@perfectlygood.in", "password": "finance12345", "role": "finance", "name": "Finance Team"},
+]
+
+
+async def migrate_v2():
+    """Idempotent: unify drops into menu_items, backfill new vendor/menu fields, seed staff."""
+    await get_settings_doc()
+    now = datetime.now(timezone.utc)
+
+    # 1. Backfill vendor fields
+    async for v in db.vendors.find({}):
+        updates = {}
+        defaults = {
+            "status": "active", "service_type": v.get("service_type", "both"),
+            "owner_name": "", "restaurant_phone": "", "full_address": v.get("location", {}).get("address", "") if isinstance(v.get("location"), dict) else "",
+            "maps_link": v.get("location", {}).get("maps_url", "") if isinstance(v.get("location"), dict) else "",
+            "assigned_ops": "", "notes": [], "pickup_start_time": "18:00", "pickup_end_time": "21:00",
+            "created_at": now, "updated_at": now, "last_order_date": None,
+        }
+        for k, val in defaults.items():
+            if k not in v:
+                updates[k] = val
+        if updates:
+            await db.vendors.update_one({"vendor_id": v["vendor_id"]}, {"$set": updates})
+
+    # 2. Backfill menu_item fields + pull discount/qty/pickup from drops
+    drops = await db.drops.find({}, {"_id": 0}).to_list(100000)
+    drop_by_menu = {}
+    drop_itemid_to_menu = {}
+    for d in drops:
+        mid = d.get("menu_item_id")
+        if mid:
+            drop_by_menu[mid] = d
+            if d.get("item_id"):
+                drop_itemid_to_menu[d["item_id"]] = mid
+        # set vendor pickup time from drop if vendor still default
+        if d.get("pickup_start_time"):
+            await db.vendors.update_one(
+                {"vendor_id": d.get("vendor_id"), "pickup_start_time": {"$in": [None, "", "18:00"]}},
+                {"$set": {"pickup_start_time": d["pickup_start_time"], "pickup_end_time": d.get("pickup_end_time", "21:00")}},
+            )
+
+    async for m in db.menu_items.find({}):
+        mid = m["menu_item_id"]
+        d = drop_by_menu.get(mid)
+        updates = {}
+        if "discounted_price" not in m:
+            if d:
+                updates["discounted_price"] = d.get("discounted_price")
+            else:
+                updates["discounted_price"] = round(m.get("original_price", 0) * 0.6, 2)
+        if "available_today" not in m:
+            updates["available_today"] = bool(d.get("is_active")) if d else False
+        if "quantity_available" not in m:
+            updates["quantity_available"] = d.get("quantity_available") if d else None
+        if "expiry" not in m:
+            updates["expiry"] = d.get("expiry", "") if d else ""
+        for k, val in (("food_type", "veg"), ("contains_egg", False), ("serving_size", ""), ("category", "")):
+            if k not in m:
+                updates[k] = val
+        if "created_at" not in m:
+            updates["created_at"] = now
+        if updates:
+            await db.menu_items.update_one({"menu_item_id": mid}, {"$set": updates})
+
+    # 3. Remap legacy orders: food_item_id was a drop item_id -> menu_item_id; store item_subtotal
+    if drop_itemid_to_menu:
+        async for o in db.orders.find({"food_item_id": {"$in": list(drop_itemid_to_menu.keys())}}):
+            new_mid = drop_itemid_to_menu.get(o.get("food_item_id"))
+            d = drops and next((x for x in drops if x.get("item_id") == o.get("food_item_id")), None)
+            set_fields = {"food_item_id": new_mid, "legacy_item_id": o.get("food_item_id")}
+            if d and o.get("item_subtotal") is None:
+                set_fields["item_subtotal"] = round(d.get("discounted_price", 0) * o.get("quantity", 1), 2)
+                set_fields["discounted_price"] = d.get("discounted_price", 0)
+            await db.orders.update_one({"order_id": o["order_id"]}, {"$set": set_fields})
+
+    # 4. Seed staff (idempotent)
+    for s in STAFF_SEED:
+        existing = await db.users.find_one({"email": s["email"]})
+        if not existing:
+            await db.users.insert_one({
+                "user_id": gen_id("user"), "email": s["email"], "name": s["name"],
+                "password_hash": hash_password(s["password"]), "role": s["role"],
+                "permission_overrides": {}, "picture": None, "location": None,
+                "created_at": now,
+            })
+            logger.info(f"Staff seeded: {s['email']}")
+        elif existing.get("role") not in STAFF_ROLES:
+            await db.users.update_one({"email": s["email"]}, {"$set": {"role": s["role"]}})
+
+    # Promote known founder admin if present
+    await db.users.update_one({"email": "anubhavg@perfectlygood.in"}, {"$set": {"role": "admin"}})
+    logger.info("migrate_v2 complete")
+
+
 # ── Startup / Shutdown ──────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
     await seed_data()
+    await migrate_v2()
     logger.info("Perfectly Good API started")
 
 @app.on_event("shutdown")

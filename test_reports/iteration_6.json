@@ -1,0 +1,58 @@
+{
+  "summary": "Tested OPS dashboard (Phase 1) - backend + frontend. Backend: created /app/backend/tests/test_ops_dashboard.py with 31 tests covering AUTH/RBAC for all 4 staff roles, dashboard stats, vendors CRUD + notes + status, menu management with default discount, availability->drops reflection, orders/users/payouts/settings, roles/staff/search, and mobile regression (drops shape, drop detail, vendor endpoints, order create+verify with subtotal*1.10 paise). All 31/31 PASS. Frontend: verified /ops on web for all 3 RBAC roles - operations shows only Dashboard/Vendors/Orders/Settings (no Users/Payouts); finance shows Dashboard/Vendors/Orders/Payouts/Settings (no Users); admin (anubhavg@perfectlygood.in/Anubhavv) shows ALL 6 nav items. Vendor detail page (Green Leaf Bakery) renders full profile + menu items with toggle/edit/duplicate/delete + payout history + internal notes section. Payouts page renders vendor settlement table with Mark Paid action and CSV export. Settings page shows commission/GST/categories/pickup slots/service types/staff list/role matrix correctly. Backend smoke logs show finance->POST /api/ops/vendors -> 403, ops->/api/ops/dashboard/stats -> 200.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/ops/dashboard/stats", "issue": "active_vendors counts vendors with status != 'inactive', so vendors missing the status field (legacy seed data) are counted as active. Fine for now since OPS create sets status='active' explicitly."},
+      {"endpoint": "/api/ops/payouts", "issue": "pending_payout can become negative (-₹1,102 observed for Green Leaf Bakery) when historical payouts exceed current 'picked_up' revenue. Display shows negative number. Consider clamping at 0 or showing 'Over-paid'."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Finance dashboard Quick Actions", "issue": "Finance role sees 'Add Vendor' and 'Upload Menu' quick action cards on Dashboard even though they lack manage_vendors/manage_menu perms. Clicking will 403. Should be hidden per-role.", "affected_testIDs": []}
+    ],
+    "design_issues": [
+      {"screen": "/ops/vendors table", "issues": ["ACTIONS column gets clipped on the right edge at 1440 width; horizontal scroll needed", "Multiple duplicate 'Test Vendor' rows visible from prior iteration leftovers - not a code bug, just test data pollution"]},
+      {"screen": "/ops/vendor/{id}", "issues": ["Pending Payout displays '₹-1,102' (negative) - confusing for user; should clamp"]}
+    ],
+    "react_native_issues": [
+      {"component": "Web app", "issue": "Console warning: \"shadow*\" style props are deprecated. Use \"boxShadow\". Multiple components use deprecated shadow* props in StyleSheet. Reference: throughout app/ops/*.tsx and shared style modules."},
+      {"component": "expo-notifications", "issue": "Console warning: \"[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.\" The push token listener is registered on web preview but not effective. Wrap in Platform.OS !== 'web' check."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ops_dashboard.py",
+    "/app/test_reports/pytest/pytest_ops.xml"
+  ],
+  "action_items": [
+    "(Minor) Hide 'Add Vendor' / 'Upload Menu' quick actions on Dashboard for roles lacking manage_vendors / manage_menu permissions (currently shown to Finance).",
+    "(Minor) Clamp pending_payout display at 0 (or add 'Over-paid' badge) on vendor detail + payouts list when value is negative.",
+    "(Cleanup) Many 'Test Vendor' / 'TEST_*' rows are left in the DB from prior test iterations. Consider a manual DB cleanup before launch.",
+    "(Polish) Replace deprecated shadow* style props with boxShadow across StyleSheets; wrap expo-notifications push-token listener with Platform.OS !== 'web' guard."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1196 -> pending_payouts uses max(net - paid, 0) so dashboard stat already clamps at 0. But /api/ops/payouts (line 1619) does NOT clamp pending_payout, hence negative shown in UI.",
+    "server.py:1617 -> 'all_net = revenue * (1 - 0.15 * 1.18)' applies commission+GST correctly across ALL picked_up orders; verified math: total_sales*0.15 commission, commission*0.18 GST, net = sales - commission - gst.",
+    "server.py:2063 -> file is ~2063 lines; consider splitting OPS endpoints (lines 1099-1763) into a separate router module to improve maintainability.",
+    "server.py:1488 -> /api/ops/menu/{id}/availability correctly toggles `available_today`; verified end-to-end with /api/drops reflection (test_availability_reflects_in_drops).",
+    "server.py:1414-1416 -> default discounted_price computed as original_price * (1 - default_discount_pct/100); verified 200*(1-0.4)=120 in test.",
+    "server.py:513 -> /api/orders/create still queries menu_items with available_today=True, so migration is consistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ops_dashboard.py"
+  ],
+  "success_rate": {
+    "backend": "100% (31/31 ops + previous 28/28 still passing)",
+    "frontend": "100% on critical paths (login redirects, RBAC sidebar, vendor list/detail, menu actions visible, payouts list, settings render). Minor RBAC visibility polish needed."
+  },
+  "seed_data_creation": "Tests create then delete TEST_Vendor_OPS, TEST_MenuVendor, TEST_staff_*, TEST_cust_* with cleanup fixtures. One ₹1 payout marked against first vendor (Spice Garden) for assertion but not cleaned up since payout history is append-only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All OPS dashboard endpoints + RBAC verified. New test file at /app/backend/tests/test_ops_dashboard.py covers 31 cases including drops reflection. Frontend /ops loads only after authenticated login from / (no /login route). Sidebar items: operations={Dashboard,Vendors,Orders,Settings}, finance={Dashboard,Vendors,Orders,Payouts,Settings}, admin=all 6. Negative pending_payout possible due to historical payouts. expo-notifications push listener warns on web (harmless).",
+  "mocked_integrations": {
+    "razorpay": "MOCKED - order_id generated locally; verify endpoint skips signature check.",
+    "geocoding": "Uses OpenStreetMap Nominatim (free, real)."
+  },
+  "rca_of_issue": "N/A - feature build verified working."
+}
