@@ -1565,9 +1565,7 @@ async def ops_list_users(request: Request, search: Optional[str] = None, page: i
     return {"items": users, "total": total, "page": page, "page_size": page_size}
 
 
-@api.get("/ops/payouts")
-async def ops_payouts(request: Request, period: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None):
-    await require_permission(request, "view_finance")
+async def _compute_payouts(period: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None):
     cfg = await get_settings_doc()
     now = datetime.now(timezone.utc)
     order_q: dict = {"status": "picked_up"}
@@ -1628,6 +1626,12 @@ async def ops_payouts(request: Request, period: Optional[str] = None, start: Opt
         })
     result.sort(key=lambda r: r["pending_payout"], reverse=True)
     return result
+
+
+@api.get("/ops/payouts")
+async def ops_payouts(request: Request, period: Optional[str] = None, start: Optional[str] = None, end: Optional[str] = None):
+    await require_permission(request, "view_finance")
+    return await _compute_payouts(period, start, end)
 
 
 @api.get("/ops/payouts/{vendor_id}/history")
@@ -1761,6 +1765,362 @@ async def ops_upload(file: UploadFile = File(...), request: Request = None):
     mime = file.content_type or "image/jpeg"
     data_uri = f"data:{mime};base64,{_b64.b64encode(contents).decode('utf-8')}"
     return {"url": data_uri}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  PHASE 2 — AI Import, Bulk Import, Exports, Analytics, Vendor Performance
+# ══════════════════════════════════════════════════════════════════════════
+
+def _as_dt(v) -> datetime:
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    try:
+        d = datetime.fromisoformat(str(v))
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def _coerce_price(v):
+    try:
+        return float(str(v).replace("₹", "").replace(",", "").strip())
+    except Exception:
+        return None
+
+
+def _parse_json_items(text: str) -> list:
+    import json, re
+    if not text:
+        return []
+    t = str(text).strip()
+    t = re.sub(r"^```(json)?", "", t).strip()
+    t = re.sub(r"```$", "", t).strip()
+    s, e = t.find("["), t.rfind("]")
+    if s != -1 and e != -1:
+        t = t[s:e + 1]
+    try:
+        data = json.loads(t)
+    except Exception:
+        return []
+    out = []
+    for d in (data if isinstance(data, list) else []):
+        if not isinstance(d, dict):
+            continue
+        name = str(d.get("name") or "").strip()
+        if not name:
+            continue
+        out.append({
+            "name": name, "description": str(d.get("description") or ""),
+            "original_price": _coerce_price(d.get("original_price")) or 0,
+            "discounted_price": None, "food_type": "veg", "contains_egg": False,
+            "serving_size": "", "category": "", "available_today": False,
+        })
+    return out
+
+
+def _normalize_menu_row(d: dict) -> dict:
+    dd = {(str(k).strip().lower() if k else ""): v for k, v in d.items()}
+    g = lambda *keys: next((dd[k] for k in keys if k in dd and dd[k] not in (None, "")), None)
+    truthy = lambda v: str(v).strip().lower() in ("yes", "true", "1", "y", "available", "live", "veg")
+    veg = g("veg", "veg/non veg", "veg / non veg", "food type", "type")
+    veg_is = True if veg is None else str(veg).strip().lower() in ("veg", "yes", "true", "1", "vegetarian", "y")
+    return {
+        "name": str(g("item name", "name", "item") or "").strip(),
+        "description": str(g("description", "desc") or ""),
+        "original_price": _coerce_price(g("original price", "price", "mrp")) or 0,
+        "discounted_price": _coerce_price(g("discounted price", "discount price", "sale price")),
+        "serving_size": str(g("serving size", "serving") or ""),
+        "category": str(g("category") or ""),
+        "food_type": "veg" if veg_is else "non_veg",
+        "contains_egg": truthy(g("contains egg", "egg") or ""),
+        "available_today": truthy(g("available today", "available", "live") or ""),
+    }
+
+
+@api.post("/ops/menu-import/extract")
+async def menu_import_extract(file: UploadFile = File(...), request: Request = None):
+    if request:
+        await require_permission(request, "ai_import")
+    import base64 as b64
+    content = await file.read()
+    fname = (file.filename or "").lower()
+    images_b64 = []
+    if fname.endswith(".pdf") or (file.content_type or "") == "application/pdf":
+        import fitz
+        doc = fitz.open(stream=content, filetype="pdf")
+        for page in doc:
+            pix = page.get_pixmap(dpi=140)
+            images_b64.append(b64.b64encode(pix.tobytes("png")).decode())
+        doc.close()
+    else:
+        images_b64.append(b64.b64encode(content).decode())
+    images_b64 = images_b64[:8]
+    if not images_b64:
+        raise HTTPException(status_code=400, detail="No readable pages found")
+
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+        chat = LlmChat(
+            api_key=os.environ.get("EMERGENT_LLM_KEY"),
+            session_id=f"menu-{secrets.token_hex(4)}",
+            system_message="You extract structured menu items from restaurant menu images. Respond with ONLY a JSON array, no prose, no markdown.",
+        ).with_model("openai", "gpt-4o")
+        prompt = (
+            "Extract EVERY menu item visible in the attached menu image(s). "
+            "Return a strict JSON array; each element must be "
+            '{"name": string, "description": string, "original_price": number}. '
+            "Use an empty string when a description is absent. original_price is a number with no currency symbol. "
+            "Skip section headers, addresses, phone numbers and any non-item text. Return ONLY the JSON array."
+        )
+        msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=b) for b in images_b64])
+        resp = await chat.send_message(msg)
+        items = _parse_json_items(resp if isinstance(resp, str) else getattr(resp, "text", str(resp)))
+    except Exception as e:
+        logger.exception("AI menu extract failed")
+        raise HTTPException(status_code=502, detail=f"AI extraction failed: {e}")
+    return {"items": items, "count": len(items), "pages": len(images_b64)}
+
+
+@api.post("/ops/menu-import/parse-file")
+async def menu_import_parse_file(file: UploadFile = File(...), request: Request = None):
+    if request:
+        await require_permission(request, "manage_menu")
+    content = await file.read()
+    fname = (file.filename or "").lower()
+    rows = []
+    if fname.endswith(".csv"):
+        import csv, io
+        text = content.decode("utf-8-sig", errors="ignore")
+        for r in csv.DictReader(io.StringIO(text)):
+            rows.append(_normalize_menu_row(r))
+    elif fname.endswith(".xlsx") or fname.endswith(".xls"):
+        import openpyxl, io
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.active
+        header_cells = next(ws.iter_rows(min_row=1, max_row=1), [])
+        headers = [str(c.value).strip() if c.value is not None else "" for c in header_cells]
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            d = {headers[i]: row[i] for i in range(min(len(headers), len(row)))}
+            rows.append(_normalize_menu_row(d))
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file. Upload a CSV or XLSX file.")
+    rows = [r for r in rows if r.get("name")]
+    return {"items": rows, "count": len(rows)}
+
+
+@api.post("/ops/vendors/{vendor_id}/menu/bulk")
+async def ops_bulk_add_menu(vendor_id: str, body: dict, request: Request):
+    await require_permission(request, "manage_menu")
+    vendor = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    cfg = await get_settings_doc()
+    now = datetime.now(timezone.utc)
+    docs = []
+    for it in body.get("items", []):
+        op = _coerce_price(it.get("original_price")) or 0
+        name = str(it.get("name") or "").strip()
+        if not name or op <= 0:
+            continue
+        dp = it.get("discounted_price")
+        dp = _coerce_price(dp) if dp not in (None, "") else None
+        if dp is None:
+            dp = round(op * (1 - cfg["default_discount_pct"] / 100), 2)
+        docs.append({
+            "menu_item_id": gen_id("menu"), "vendor_id": vendor_id, "name": name,
+            "description": str(it.get("description") or ""), "original_price": op,
+            "discounted_price": dp, "category": str(it.get("category") or vendor.get("category", "")),
+            "serving_size": str(it.get("serving_size") or ""), "food_type": it.get("food_type") or "veg",
+            "contains_egg": bool(it.get("contains_egg")), "available_today": bool(it.get("available_today")),
+            "quantity_available": None,
+            "image_url": it.get("image_url") or "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600",
+            "created_at": now, "updated_at": now,
+        })
+    if docs:
+        await db.menu_items.insert_many(docs)
+    return {"created": len(docs)}
+
+
+async def _export_dataset(entity: str):
+    cfg = await get_settings_doc()
+    if entity == "vendors":
+        vendors = await db.vendors.find({}, {"_id": 0}).to_list(5000)
+        agg = await _vendor_aggregates([v["vendor_id"] for v in vendors])
+        header = ["Vendor", "Owner", "Category", "Phone", "Email", "Service Type", "Status", "Menu Items", "Orders", "Revenue", "Date Added"]
+        rows = [[v.get("name"), v.get("owner_name"), v.get("category"), v.get("phone"), v.get("email"),
+                 v.get("service_type"), v.get("status"), agg.get(v["vendor_id"], {}).get("menu_count", 0),
+                 agg.get(v["vendor_id"], {}).get("order_count", 0), agg.get(v["vendor_id"], {}).get("revenue", 0),
+                 fmt_dt(v.get("created_at"))] for v in vendors]
+        return header, rows
+    if entity == "orders":
+        orders = await db.orders.find({}, {"_id": 0}).sort("created_at", -1).to_list(100000)
+        header = ["Order ID", "Customer", "Vendor", "Item", "Qty", "Order Value", "Commission", "Status", "Payment", "Created"]
+        rows = [[o.get("order_id"), o.get("user_name"), o.get("vendor_name"), o.get("food_item_name"),
+                 o.get("quantity"), o.get("total_amount"), round(order_revenue(o) * cfg["commission_rate"], 2),
+                 o.get("status"), "Paid" if o.get("razorpay_payment_id") else "Pending", fmt_dt(o.get("created_at"))] for o in orders]
+        return header, rows
+    if entity == "customers":
+        users = await db.users.find({"role": "user"}, {"_id": 0, "password_hash": 0}).to_list(100000)
+        uids = [u["user_id"] for u in users]
+        orders = await db.orders.find({"user_id": {"$in": uids}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(200000)
+        items = await db.menu_items.find({}, {"_id": 0, "menu_item_id": 1, "original_price": 1}).to_list(200000)
+        orig = {i["menu_item_id"]: i.get("original_price", 0) for i in items}
+        from collections import defaultdict
+        agg = defaultdict(lambda: {"orders": 0, "saved": 0.0})
+        for o in orders:
+            a = agg[o.get("user_id")]; a["orders"] += 1
+            a["saved"] += max(orig.get(o.get("food_item_id"), 0) * o.get("quantity", 1) - order_revenue(o), 0)
+        header = ["Name", "Email", "Phone", "Orders", "Money Saved", "Joined"]
+        rows = [[u.get("name"), u.get("email"), u.get("phone"), agg[u["user_id"]]["orders"],
+                 round(agg[u["user_id"]]["saved"], 2), fmt_dt(u.get("created_at"))] for u in users]
+        return header, rows
+    if entity == "menu":
+        items = await db.menu_items.find({}, {"_id": 0}).to_list(200000)
+        vmap = {v["vendor_id"]: v.get("name", "") for v in await db.vendors.find({}, {"_id": 0, "vendor_id": 1, "name": 1}).to_list(5000)}
+        header = ["Vendor", "Item", "Description", "Category", "Original Price", "Discounted Price", "Veg/Non-Veg", "Contains Egg", "Serving Size", "Available Today"]
+        rows = [[vmap.get(m.get("vendor_id"), ""), m.get("name"), m.get("description"), m.get("category"),
+                 m.get("original_price"), m.get("discounted_price"), m.get("food_type"),
+                 "Yes" if m.get("contains_egg") else "No", m.get("serving_size"), "Yes" if m.get("available_today") else "No"] for m in items]
+        return header, rows
+    if entity == "payouts":
+        data = await _compute_payouts()
+        header = ["Vendor", "Total Sales", "Commission", "GST on Commission", "Net Payable", "Completed Orders", "Pending Orders", "Total Paid", "Pending Payout", "Status", "Last Payout"]
+        rows = [[d["vendor_name"], d["total_sales"], d["commission"], d["gst_on_commission"], d["net_payable"],
+                 d["completed_orders"], d["pending_orders"], d["total_paid"], d["pending_payout"], d["status"],
+                 fmt_dt(d.get("last_payout_date"))] for d in data]
+        return header, rows
+    raise HTTPException(status_code=404, detail="Unknown export entity")
+
+
+def fmt_dt(v):
+    if not v:
+        return ""
+    try:
+        return _as_dt(v).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(v)
+
+
+@api.get("/ops/export/{entity}")
+async def ops_export(entity: str, request: Request, format: str = "csv"):
+    perm_map = {"vendors": "view_vendors", "orders": "view_orders", "customers": "view_users", "menu": "view_vendors", "payouts": "view_finance"}
+    if entity not in perm_map:
+        raise HTTPException(status_code=404, detail="Unknown export entity")
+    await require_permission(request, perm_map[entity])
+    from fastapi.responses import StreamingResponse
+    header, rows = await _export_dataset(entity)
+    if format == "xlsx":
+        import openpyxl, io
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = entity[:31]
+        ws.append(header)
+        for r in rows:
+            ws.append(["" if c is None else c for c in r])
+        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": f'attachment; filename="{entity}.xlsx"'})
+    import csv, io
+    buf = io.StringIO(); w = csv.writer(buf); w.writerow(header); w.writerows(rows)
+    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
+                             headers={"Content-Disposition": f'attachment; filename="{entity}.csv"'})
+
+
+@api.get("/ops/analytics")
+async def ops_analytics(request: Request, days: int = 30):
+    await require_permission(request, "view_dashboard")
+    from collections import defaultdict
+    cfg = await get_settings_doc()
+    now = datetime.now(timezone.utc)
+    days = max(7, min(days, 90))
+    start = _day_start(now) - timedelta(days=days - 1)
+
+    window_orders = await db.orders.find({"created_at": {"$gte": start}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(200000)
+    rev_day, ord_day = defaultdict(float), defaultdict(int)
+    for o in window_orders:
+        key = _as_dt(o.get("created_at")).strftime("%Y-%m-%d")
+        rev_day[key] += order_revenue(o); ord_day[key] += 1
+    trend = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).strftime("%Y-%m-%d")
+        trend.append({"date": d, "revenue": round(rev_day.get(d, 0), 2), "orders": ord_day.get(d, 0)})
+
+    completed = await db.orders.find({"status": "picked_up"}, {"_id": 0}).to_list(200000)
+    items = await db.menu_items.find({}, {"_id": 0, "menu_item_id": 1, "original_price": 1, "category": 1, "vendor_id": 1}).to_list(200000)
+    orig = {i["menu_item_id"]: i.get("original_price", 0) for i in items}
+    cat_by_item = {i["menu_item_id"]: (i.get("category") or "") for i in items}
+    item_vendor = {i["menu_item_id"]: i.get("vendor_id") for i in items}
+    vendors = await db.vendors.find({}, {"_id": 0, "vendor_id": 1, "name": 1, "category": 1}).to_list(5000)
+    vcat = {v["vendor_id"]: v.get("category", "") for v in vendors}
+
+    total_rev = round(sum(order_revenue(o) for o in completed), 2)
+    money_saved = 0.0; food_value = 0.0
+    for o in completed:
+        ov = orig.get(o.get("food_item_id"), 0) * o.get("quantity", 1)
+        food_value += ov; money_saved += max(ov - order_revenue(o), 0)
+
+    rev_vendor = defaultdict(lambda: {"rev": 0.0, "orders": 0, "name": ""})
+    item_sales = defaultdict(lambda: {"qty": 0, "rev": 0.0, "name": ""})
+    cat_agg = defaultdict(lambda: {"orders": 0, "revenue": 0.0})
+    for o in completed:
+        rv = rev_vendor[o.get("vendor_id")]; rv["rev"] += order_revenue(o); rv["orders"] += 1; rv["name"] = o.get("vendor_name", "")
+        si = item_sales[o.get("food_item_id")]; si["qty"] += o.get("quantity", 1); si["rev"] += order_revenue(o); si["name"] = o.get("food_item_name", "")
+        c = cat_by_item.get(o.get("food_item_id")) or vcat.get(item_vendor.get(o.get("food_item_id"), ""), "") or "Uncategorized"
+        cat_agg[c]["orders"] += 1; cat_agg[c]["revenue"] += order_revenue(o)
+
+    top_vendors = sorted([{"vendor_id": k, "name": v["name"], "revenue": round(v["rev"], 2), "orders": v["orders"]} for k, v in rev_vendor.items()], key=lambda x: x["revenue"], reverse=True)[:5]
+    top_items = sorted([{"item_id": k, "name": v["name"], "qty": v["qty"], "revenue": round(v["rev"], 2)} for k, v in item_sales.items()], key=lambda x: x["qty"], reverse=True)[:5]
+    perf = {v["vendor_id"]: {"vendor_id": v["vendor_id"], "name": v.get("name", ""), "revenue": 0.0, "orders": 0} for v in vendors}
+    for k, v in rev_vendor.items():
+        if k in perf:
+            perf[k]["revenue"] = round(v["rev"], 2); perf[k]["orders"] = v["orders"]
+    lowest = sorted(perf.values(), key=lambda x: (x["revenue"], x["orders"]))[:5]
+    categories = [{"category": k, "orders": v["orders"], "revenue": round(v["revenue"], 2), "commission": round(v["revenue"] * cfg["commission_rate"], 2)} for k, v in sorted(cat_agg.items(), key=lambda x: x[1]["revenue"], reverse=True)]
+
+    return {
+        "trend": trend,
+        "totals": {
+            "revenue": total_rev, "orders": len(completed),
+            "commission": round(total_rev * cfg["commission_rate"], 2),
+            "money_saved": round(money_saved, 2), "food_value_rescued": round(food_value, 2),
+            "aov": round(total_rev / max(len(completed), 1), 2),
+            "new_users": await db.users.count_documents({"role": "user", "created_at": {"$gte": start}}),
+            "new_vendors": await db.vendors.count_documents({"created_at": {"$gte": start}}),
+            "active_vendors": await db.vendors.count_documents({"status": {"$ne": "inactive"}}),
+        },
+        "top_vendors": top_vendors, "top_items": top_items, "lowest_vendors": lowest, "categories": categories,
+    }
+
+
+@api.get("/ops/vendors/{vendor_id}/performance")
+async def ops_vendor_performance(vendor_id: str, request: Request):
+    await require_permission(request, "view_vendors")
+    from collections import defaultdict
+    cfg = await get_settings_doc()
+    now = datetime.now(timezone.utc)
+    week0 = _day_start(now) - timedelta(days=7)
+    month0 = _month_start(now)
+    orders = await db.orders.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(100000)
+    valid = [o for o in orders if o.get("status") != "cancelled"]
+    completed = [o for o in orders if o.get("status") == "picked_up"]
+    revenue = round(sum(order_revenue(o) for o in completed), 2)
+    menu = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(2000)
+    item_qty = defaultdict(int); names = {}
+    for o in completed:
+        item_qty[o.get("food_item_id")] += o.get("quantity", 1); names[o.get("food_item_id")] = o.get("food_item_name", "")
+    best = max(item_qty.items(), key=lambda x: x[1]) if item_qty else None
+    last_order = max([_as_dt(o.get("created_at")) for o in orders], default=None)
+    return {
+        "total_orders": len(valid),
+        "orders_week": len([o for o in valid if _as_dt(o.get("created_at")) >= week0]),
+        "orders_month": len([o for o in valid if _as_dt(o.get("created_at")) >= month0]),
+        "revenue": revenue,
+        "commission": round(revenue * cfg["commission_rate"], 2),
+        "aov": round(revenue / max(len(completed), 1), 2),
+        "total_listings": len(menu),
+        "active_listings_today": len([m for m in menu if m.get("available_today")]),
+        "best_selling_item": names.get(best[0]) if best else None,
+        "best_selling_qty": best[1] if best else 0,
+        "last_order_date": last_order.isoformat() if last_order else None,
+    }
 
 
 # ── Health ──────────────────────────────────────────────────────────────

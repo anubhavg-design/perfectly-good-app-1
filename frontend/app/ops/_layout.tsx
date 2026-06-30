@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet, ScrollView, useWindowDimensions, Tex
 import { Slot, usePathname, useRouter } from 'expo-router';
 import {
   LayoutDashboard, Store, ShoppingBag, Users, Wallet, Settings as SettingsIcon,
-  Menu as MenuIcon, X, Search, LogOut,
+  Menu as MenuIcon, X, Search, LogOut, BarChart3,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { opsApi } from '../../src/api/opsApi';
@@ -12,6 +12,7 @@ import { Spinner } from '../../src/ops/ui';
 
 const NAV = [
   { label: 'Dashboard', route: '/ops', icon: LayoutDashboard, perm: 'view_dashboard' },
+  { label: 'Analytics', route: '/ops/analytics', icon: BarChart3, perm: 'view_dashboard' },
   { label: 'Vendors', route: '/ops/vendors', icon: Store, perm: 'view_vendors' },
   { label: 'Orders', route: '/ops/orders', icon: ShoppingBag, perm: 'view_orders' },
   { label: 'Users', route: '/ops/users', icon: Users, perm: 'view_users' },

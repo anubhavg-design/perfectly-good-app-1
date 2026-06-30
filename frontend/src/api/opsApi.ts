@@ -1,4 +1,42 @@
-import { apiFetch } from './client';
+import { Platform } from 'react-native';
+import { apiFetch, getToken } from './client';
+
+const API = (() => {
+  const u = process.env.EXPO_PUBLIC_BACKEND_URL;
+  return u ? `${u.replace(/\/$/, '')}/api` : '/api';
+})();
+
+async function postFile(path: string, uri: string, name: string) {
+  const token = await getToken();
+  const blob = await (await fetch(uri)).blob();
+  const fd = new FormData();
+  fd.append('file', blob as any, name || 'upload');
+  const res = await fetch(`${API}${path}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || 'Upload failed');
+  return data;
+}
+
+export async function downloadExport(entity: string, format: 'csv' | 'xlsx') {
+  const token = await getToken();
+  const res = await fetch(`${API}/ops/export/${entity}?format=${format}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error('Export failed');
+  const blob = await res.blob();
+  if (Platform.OS === 'web') {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${entity}.${format}`; a.click();
+    URL.revokeObjectURL(url);
+  } else {
+    throw new Error('Exports download from the web dashboard.');
+  }
+}
 
 const qs = (o: Record<string, any> = {}) => {
   const parts = Object.entries(o)
@@ -45,4 +83,10 @@ export const opsApi = {
   deleteStaff: (id: string) => apiFetch(`/ops/staff/${id}`, { method: 'DELETE' }),
 
   search: (q: string) => apiFetch(`/ops/search?q=${encodeURIComponent(q)}`),
+
+  analytics: (days = 30) => apiFetch(`/ops/analytics?days=${days}`),
+  vendorPerformance: (id: string) => apiFetch(`/ops/vendors/${id}/performance`),
+  extractMenu: (uri: string, name: string) => postFile('/ops/menu-import/extract', uri, name),
+  parseMenuFile: (uri: string, name: string) => postFile('/ops/menu-import/parse-file', uri, name),
+  bulkAddMenu: (id: string, items: any[]) => apiFetch(`/ops/vendors/${id}/menu/bulk`, { method: 'POST', body: JSON.stringify({ items }) }),
 };
