@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Store, CheckCircle2, Clock, UtensilsCrossed, ShoppingBag, CalendarDays, IndianRupee, TrendingUp, Wallet, Plus, Upload, Eye } from 'lucide-react-native';
 import { opsApi } from '../../src/api/opsApi';
-import { C, SP, R, money } from '../../src/ops/theme';
+import { C, SP, R, money, hasPerm } from '../../src/ops/theme';
 import { Card, Spinner, PageHeader } from '../../src/ops/ui';
 import { useAuth } from '../../src/context/AuthContext';
 
@@ -50,9 +50,9 @@ export default function Dashboard() {
 
       <Text style={styles.section}>Quick Actions</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.md }}>
-        <QuickAction icon={Plus} label="Add Vendor" onPress={() => router.push('/ops/vendors?add=1')} />
-        <QuickAction icon={Upload} label="Upload Menu" onPress={() => router.push('/ops/vendors')} />
-        <QuickAction icon={Eye} label="View Orders" onPress={() => router.push('/ops/orders')} />
+        {hasPerm(user, 'manage_vendors') && <QuickAction icon={Plus} label="Add Vendor" onPress={() => router.push('/ops/vendors?add=1')} />}
+        {hasPerm(user, 'manage_menu') && <QuickAction icon={Upload} label="Upload Menu" onPress={() => router.push('/ops/vendors')} />}
+        {hasPerm(user, 'view_orders') && <QuickAction icon={Eye} label="View Orders" onPress={() => router.push('/ops/orders')} />}
       </View>
     </View>
   );

@@ -1616,7 +1616,7 @@ async def ops_payouts(request: Request, period: Optional[str] = None, start: Opt
         net_payable = round(total_sales - commission - gst_on_comm, 2)
         all_net = round(all_net_by_vendor.get(vid, 0.0) * (1 - cfg["commission_rate"] * (1 + cfg["gst_on_commission"])), 2)
         paid = round(paid_by_vendor.get(vid, 0.0), 2)
-        pending_amt = round(all_net - paid, 2)
+        pending_amt = round(max(all_net - paid, 0), 2)
         result.append({
             "vendor_id": vid, "vendor_name": v.get("name", ""),
             "total_sales": total_sales, "commission": commission, "gst_on_commission": gst_on_comm,
