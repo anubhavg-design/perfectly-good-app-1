@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { opsApi } from '../../src/api/opsApi';
 import { C, SP, money, fmtDateTime, titleCase, hasPerm } from '../../src/ops/theme';
 import { Card, Badge, DataTable, Spinner, PageHeader, Chips, Dropdown, EmptyState, Btn } from '../../src/ops/ui';
+import { ExportButtons } from '../../src/ops/ExportButtons';
 import { useAuth } from '../../src/context/AuthContext';
 
 const STATUS_TONE: any = { reserved: 'info', picked_up: 'success', cancelled: 'danger', expired: 'warn' };
@@ -47,7 +48,7 @@ export default function Orders() {
 
   return (
     <View>
-      <PageHeader title="Orders" subtitle={`${data.total || 0} orders`} />
+      <PageHeader title="Orders" subtitle={`${data.total || 0} orders`} right={<ExportButtons entity="orders" />} />
       <Card style={{ marginBottom: SP.lg, padding: SP.md }}>
         <View style={{ flexDirection: 'row', gap: SP.lg, flexWrap: 'wrap', alignItems: 'center' }}>
           <View><Text style={styles.flabel}>Period</Text><Chips value={range} options={['', 'today', 'week']} onChange={(v) => { setRange(v); setPage(1); }} /></View>

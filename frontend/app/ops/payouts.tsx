@@ -1,24 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Platform, Pressable } from 'react-native';
-import { Download, IndianRupee } from 'lucide-react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { IndianRupee } from 'lucide-react-native';
 import { opsApi } from '../../src/api/opsApi';
 import { C, SP, money, fmtDate, titleCase, hasPerm } from '../../src/ops/theme';
 import { Card, Btn, Badge, DataTable, Spinner, PageHeader, Chips, Sheet, Field, TextField, Dropdown, EmptyState } from '../../src/ops/ui';
+import { ExportButtons } from '../../src/ops/ExportButtons';
 import { useAuth } from '../../src/context/AuthContext';
-
-function exportCSV(filename: string, header: string[], rows: any[][]) {
-  const esc = (c: any) => `"${String(c ?? '').replace(/"/g, '""')}"`;
-  const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\n');
-  if (Platform.OS === 'web') {
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  } else {
-    alert('CSV export is available on the web dashboard.');
-  }
-}
 
 export default function Payouts() {
   const { user } = useAuth();
@@ -45,12 +32,6 @@ export default function Payouts() {
     } catch (e: any) { alert(e.message); } finally { setSaving(false); }
   };
 
-  const doExport = () => exportCSV(
-    `payouts_${period || 'all'}_${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Vendor', 'Total Sales', 'Commission', 'GST on Commission', 'Net Payable', 'Completed Orders', 'Pending Orders', 'Total Paid', 'Pending Payout', 'Status', 'Last Payout'],
-    rows.map((r) => [r.vendor_name, r.total_sales, r.commission, r.gst_on_commission, r.net_payable, r.completed_orders, r.pending_orders, r.total_paid, r.pending_payout, r.status, fmtDate(r.last_payout_date)]),
-  );
-
   const columns = [
     { key: 'vendor_name', label: 'Vendor', width: 170, render: (r: any) => <Text style={{ fontWeight: '700', fontSize: 14 }}>{r.vendor_name}</Text> },
     { key: 'total_sales', label: 'Total Sales', width: 110, render: (r: any) => <Text style={{ fontWeight: '600' }}>{money(r.total_sales)}</Text> },
@@ -68,7 +49,7 @@ export default function Payouts() {
   return (
     <View>
       <PageHeader title="Payouts" subtitle="Vendor settlements"
-        right={<Btn title="Export CSV" icon={Download} variant="secondary" onPress={doExport} />} />
+        right={<ExportButtons entity="payouts" />} />
       <Card style={{ marginBottom: SP.lg, padding: SP.md }}>
         <Text style={styles.flabel}>Period</Text>
         <Chips value={period} options={['', 'weekly', 'monthly']} onChange={setPeriod} />

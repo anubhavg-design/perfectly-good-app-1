@@ -6,6 +6,7 @@ import { opsApi } from '../../src/api/opsApi';
 import { C, SP, R, money, fmtDate, titleCase, hasPerm } from '../../src/ops/theme';
 import { Card, Btn, Badge, DataTable, Spinner, PageHeader, Sheet, ConfirmDialog, Chips, Dropdown, EmptyState } from '../../src/ops/ui';
 import { VendorForm } from '../../src/ops/forms';
+import { ExportButtons } from '../../src/ops/ExportButtons';
 import { useAuth } from '../../src/context/AuthContext';
 
 export default function Vendors() {
@@ -90,7 +91,12 @@ export default function Vendors() {
   return (
     <View>
       <PageHeader title="Vendors" subtitle={`${data.total || 0} total`}
-        right={canManage ? <Btn title="Add Vendor" icon={Plus} onPress={() => { setEditing(null); setShowForm(true); }} /> : undefined} />
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP.md }}>
+            <ExportButtons entity="vendors" />
+            {canManage ? <Btn title="Add Vendor" icon={Plus} onPress={() => { setEditing(null); setShowForm(true); }} /> : null}
+          </View>
+        } />
 
       <Card style={{ marginBottom: SP.lg, padding: SP.md }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP.md, flexWrap: 'wrap' }}>

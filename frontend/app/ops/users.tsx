@@ -4,6 +4,7 @@ import { Search } from 'lucide-react-native';
 import { opsApi } from '../../src/api/opsApi';
 import { C, SP, R, money, fmtDate } from '../../src/ops/theme';
 import { Card, DataTable, Spinner, PageHeader, EmptyState, Btn } from '../../src/ops/ui';
+import { ExportButtons } from '../../src/ops/ExportButtons';
 
 export default function UsersPage() {
   const [data, setData] = useState<any>({ items: [], total: 0 });
@@ -30,7 +31,7 @@ export default function UsersPage() {
 
   return (
     <View>
-      <PageHeader title="Customers" subtitle={`${data.total || 0} registered`} />
+      <PageHeader title="Customers" subtitle={`${data.total || 0} registered`} right={<ExportButtons entity="customers" />} />
       <Card style={{ marginBottom: SP.lg, padding: SP.md }}>
         <View style={styles.searchBox}>
           <Search size={16} color={C.textMute} />

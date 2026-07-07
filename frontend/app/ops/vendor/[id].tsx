@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, Linking, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, Pencil, Plus, Copy, Trash2, MapPin, Phone, Mail, Store, ExternalLink } from 'lucide-react-native';
+import { ChevronLeft, Pencil, Plus, Copy, Trash2, MapPin, Phone, Mail, Store, ExternalLink, Sparkles } from 'lucide-react-native';
 import { opsApi } from '../../../src/api/opsApi';
 import { C, SP, R, money, fmtDate, fmtDateTime, titleCase, hasPerm } from '../../../src/ops/theme';
 import { Card, Btn, Badge, Spinner, Sheet, ConfirmDialog, Toggle, DataTable, EmptyState } from '../../../src/ops/ui';
 import { VendorForm, MenuItemForm } from '../../../src/ops/forms';
+import { ImportMenu } from '../../../src/ops/ImportMenu';
+import { ExportButtons } from '../../../src/ops/ExportButtons';
 import { useAuth } from '../../../src/context/AuthContext';
 
 export default function VendorProfile() {
@@ -25,10 +27,13 @@ export default function VendorProfile() {
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState<any>(null);
   const [note, setNote] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
+  const [perf, setPerf] = useState<any>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
     try { setV(await opsApi.vendor(id)); } catch (e) {} finally { setLoading(false); }
+    opsApi.vendorPerformance(id).then(setPerf).catch(() => {});
   }, [id]);
 
   useEffect(() => { opsApi.settings().then((s) => setCategories(s.categories || [])).catch(() => {}); }, []);
@@ -107,10 +112,30 @@ export default function VendorProfile() {
         {canFinance && <Stat label="Pending Payout" value={money(v.pending_payout)} accent />}
       </View>
 
+      {/* Vendor Performance */}
+      {perf && (
+        <>
+          <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Vendor Performance</Text></View>
+          <View style={styles.statRow}>
+            <Stat label="Orders (7d)" value={perf.orders_week ?? 0} />
+            <Stat label="Orders (30d)" value={perf.orders_month ?? 0} />
+            <Stat label="Avg Order Value" value={money(perf.aov)} />
+            <Stat label="Active Today" value={`${perf.active_listings_today ?? 0} / ${perf.total_listings ?? 0}`} />
+            <Stat label="Best Seller" value={perf.best_selling_item ? `${perf.best_selling_item} (${perf.best_selling_qty})` : '—'} />
+            <Stat label="Last Order" value={perf.last_order_date ? fmtDate(perf.last_order_date) : '—'} />
+          </View>
+        </>
+      )}
+
       {/* Menu management */}
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>Menu Items ({v.menu_items?.length || 0})</Text>
-        {canMenu && <Btn title="Add Item" icon={Plus} small onPress={() => setItemForm({})} />}
+        {canMenu && (
+          <View style={{ flexDirection: 'row', gap: SP.sm }}>
+            <Btn title="Import" icon={Sparkles} variant="secondary" small onPress={() => setImportOpen(true)} />
+            <Btn title="Add Item" icon={Plus} small onPress={() => setItemForm({})} />
+          </View>
+        )}
       </View>
       <View style={{ gap: SP.md }}>
         {(v.menu_items || []).length === 0 ? (
@@ -193,6 +218,8 @@ export default function VendorProfile() {
       <Sheet visible={!!itemForm} onClose={() => setItemForm(null)} title={itemForm?.menu_item_id ? 'Edit Menu Item' : 'Add Menu Item'} wide>
         <MenuItemForm initial={itemForm} categories={categories} onSubmit={saveItem} submitting={saving} />
       </Sheet>
+      <ImportMenu visible={importOpen} vendorId={id} onClose={() => setImportOpen(false)}
+        onDone={async () => { setImportOpen(false); await load(); }} />
       <ConfirmDialog visible={!!confirm} title="Delete item?" danger loading={saving}
         message={`Delete "${confirm?.name}"? This cannot be undone.`} confirmLabel="Delete"
         onConfirm={deleteItem} onCancel={() => setConfirm(null)} />
