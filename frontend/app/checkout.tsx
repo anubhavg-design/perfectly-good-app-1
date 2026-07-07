@@ -21,6 +21,7 @@ export default function CheckoutScreen() {
     vendorName: string;
     maxQty: string;
     imageUrl: string;
+    orderType: string;
   }>();
   const router = useRouter();
   const [quantity, setQuantity] = useState(1);
@@ -28,9 +29,12 @@ export default function CheckoutScreen() {
   const [showRazorpay, setShowRazorpay] = useState(false);
   const [razorpayData, setRazorpayData] = useState<any>(null);
 
+  const orderType = (params.orderType as string) || 'surplus';
+  const ORDER_LABELS: Record<string, string> = { surplus: 'Surplus', takeaway: 'Takeaway', dine_in: 'Dine-in' };
+  const orderLabel = ORDER_LABELS[orderType] || 'Surplus';
   const price = Number(params.price);
   const originalPrice = Number(params.originalPrice);
-  const maxQty = Number(params.maxQty);
+  const maxQty = Number(params.maxQty) > 0 ? Number(params.maxQty) : 99;
   const subtotal = price * quantity;
   const gst = Math.round(subtotal * 0.05);
   const convenienceFee = Math.round(subtotal * 0.05);
@@ -43,6 +47,7 @@ export default function CheckoutScreen() {
       const orderData = await ordersApi.create({
         food_item_id: params.itemId!,
         quantity,
+        order_type: orderType,
       });
       setRazorpayData(orderData);
       setShowRazorpay(true);
@@ -117,6 +122,7 @@ export default function CheckoutScreen() {
             razorpay_signature: data.razorpay_signature,
             food_item_id: params.itemId!,
             quantity,
+            order_type: orderType,
           });
           Alert.alert('Reserved!', 'Your food has been reserved. Check My Orders for details.', [
             { text: 'View Orders', onPress: () => router.replace('/(tabs)/orders') },
@@ -179,6 +185,9 @@ export default function CheckoutScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Item Summary */}
         <View style={styles.itemCard}>
+          <View style={styles.orderTypeBadge}>
+            <Text style={styles.orderTypeBadgeText}>{orderLabel}</Text>
+          </View>
           <Text style={styles.itemName}>{params.name}</Text>
           <Text style={styles.itemVendor}>{params.vendorName}</Text>
         </View>
@@ -205,7 +214,7 @@ export default function CheckoutScreen() {
               <Plus size={20} color={quantity >= maxQty ? COLORS.textMuted : COLORS.primary} />
             </TouchableOpacity>
           </View>
-          <Text style={styles.maxQtyHint}>Max available: {maxQty}</Text>
+          <Text style={styles.maxQtyHint}>{orderType === 'surplus' ? `Max available: ${maxQty}` : ' '}</Text>
         </View>
 
         {/* Price Breakdown */}
@@ -229,9 +238,11 @@ export default function CheckoutScreen() {
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.totalValue}>₹{total}</Text>
             </View>
-            <View style={[styles.savingsRow]}>
-              <Text style={styles.savingsText}>You save ₹{totalSavings} on this order!</Text>
-            </View>
+            {totalSavings > 0 ? (
+              <View style={[styles.savingsRow]}>
+                <Text style={styles.savingsText}>You save ₹{totalSavings} on this order!</Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -269,6 +280,8 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
   scrollContent: { padding: SPACING.md, paddingBottom: 100 },
   itemCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.md, ...SHADOWS.small },
+  orderTypeBadge: { alignSelf: 'flex-start', backgroundColor: COLORS.primary + '18', borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm + 2, paddingVertical: 3, marginBottom: SPACING.xs },
+  orderTypeBadgeText: { fontSize: 11, fontFamily: 'DMSans_700Bold', color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 0.6 },
   itemName: { fontSize: 18, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
   itemVendor: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 4 },
   section: { marginBottom: SPACING.lg },

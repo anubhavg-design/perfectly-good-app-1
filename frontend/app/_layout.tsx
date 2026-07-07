@@ -50,6 +50,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="drop/[id]" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="restaurant/[id]" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="checkout" options={{ presentation: 'modal' }} />
         <Stack.Screen name="admin" />
         <Stack.Screen name="vendor-create-drop" options={{ animation: 'slide_from_bottom' }} />

@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  FlatList, Image, ActivityIndicator, RefreshControl, ScrollView, Platform,
+  FlatList, Image, ActivityIndicator, RefreshControl, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Search, SlidersHorizontal, MapPin, Clock, X, Tag } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
-import { dropsApi } from '../../src/api/client';
+import { dropsApi, restaurantsApi } from '../../src/api/client';
 import * as Location from 'expo-location';
 
 // Default: Bangalore
@@ -15,6 +15,7 @@ const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
 
 function getTimeRemaining(endTime: string) {
+  if (!endTime) return '';
   const now = new Date();
   const [h, m] = endTime.split(':').map(Number);
   const end = new Date(now);
@@ -28,36 +29,20 @@ function getTimeRemaining(endTime: string) {
 }
 
 function getDiscount(original: number, discounted: number) {
+  if (!original) return 0;
   return Math.round(((original - discounted) / original) * 100);
-}
-
-interface Drop {
-  item_id: string;
-  name: string;
-  description: string;
-  original_price: number;
-  discounted_price: number;
-  quantity_available: number;
-  pickup_start_time: string;
-  pickup_end_time: string;
-  image_url: string;
-  vendor_name: string;
-  vendor_location: { lat: number; lon: number; address: string };
-  vendor_category: string;
-  is_active: boolean;
-  expiry?: string;
 }
 
 export default function HomeScreen() {
   const router = useRouter();
-  const [drops, setDrops] = useState<Drop[]>([]);
+  const [drops, setDrops] = useState<any[]>([]);
+  const [restaurants, setRestaurants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [sortBy, setSortBy] = useState('');
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
 
@@ -76,8 +61,8 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    loadDrops();
-  }, [search, selectedCategory, sortBy, lat, lon]);
+    loadData();
+  }, [search, selectedCategory, lat, lon]);
 
   const loadCategories = async () => {
     try {
@@ -86,18 +71,17 @@ export default function HomeScreen() {
     } catch {}
   };
 
-  const loadDrops = async () => {
+  const loadData = async () => {
     try {
       setLoading(true);
-      const data = await dropsApi.list({
-        lat, lon,
-        search: search || undefined,
-        category: selectedCategory || undefined,
-        sort_by: sortBy || undefined,
-      });
-      setDrops(data || []);
+      const [dropsRes, restRes] = await Promise.all([
+        dropsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined }),
+        restaurantsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined }),
+      ]);
+      setDrops(dropsRes || []);
+      setRestaurants(restRes || []);
     } catch (err) {
-      console.log('Failed to load drops', err);
+      console.log('Failed to load home', err);
     } finally {
       setLoading(false);
     }
@@ -105,63 +89,37 @@ export default function HomeScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadDrops();
+    await loadData();
     setRefreshing(false);
-  }, [search, selectedCategory, sortBy, lat, lon]);
+  }, [search, selectedCategory, lat, lon]);
 
-  const renderDrop = ({ item }: { item: Drop }) => {
+  const renderSurplusCard = ({ item }: { item: any }) => {
     const discount = getDiscount(item.original_price, item.discounted_price);
     const timeLeft = getTimeRemaining(item.pickup_end_time);
-
     return (
       <TouchableOpacity
-        testID={`drop-card-${item.item_id}`}
-        style={styles.card}
+        testID={`surplus-card-${item.item_id}`}
+        style={styles.surplusCard}
         onPress={() => router.push(`/drop/${item.item_id}`)}
         activeOpacity={0.85}
       >
-        <View style={styles.imageContainer}>
-          <Image source={{ uri: item.image_url }} style={styles.cardImage} />
-          {/* Discount badge */}
+        <View>
+          <Image source={{ uri: item.image_url }} style={styles.surplusImage} />
           <View style={styles.discountBadge}>
             <Text style={styles.discountBadgeText}>{discount}% OFF</Text>
           </View>
-          {/* Quantity badge */}
-          {item.quantity_available <= 5 && (
-            <View style={styles.quantityBadge}>
-              <Text style={styles.quantityBadgeText}>{item.quantity_available} left!</Text>
-            </View>
-          )}
         </View>
-
-        <View style={styles.cardContent}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.vendorCategory}>{item.vendor_category}</Text>
-            <View style={styles.timerRow}>
-              <Clock size={12} color={COLORS.accentUrgent} />
-              <Text style={styles.timerText}>{timeLeft}</Text>
-            </View>
+        <View style={styles.surplusBody}>
+          <Text style={styles.surplusName} numberOfLines={1}>{item.name}</Text>
+          <Text style={styles.surplusVendor} numberOfLines={1}>{item.vendor_name}</Text>
+          <View style={styles.surplusPriceRow}>
+            <Text style={styles.surplusPrice}>₹{item.discounted_price}</Text>
+            <Text style={styles.surplusStrike}>₹{item.original_price}</Text>
           </View>
-
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
-          <Text style={styles.vendorName} numberOfLines={1}>{item.vendor_name}</Text>
-
-          <View style={styles.priceRow}>
-            <Text style={styles.discountedPrice}>₹{item.discounted_price}</Text>
-            <Text style={styles.originalPrice}>₹{item.original_price}</Text>
-          </View>
-
-          <View style={styles.locationRow}>
-            <MapPin size={12} color={COLORS.textMuted} />
-            <Text style={styles.locationText} numberOfLines={1}>
-              {item.vendor_location?.address || 'Nearby'}
-            </Text>
-          </View>
-
-          {item.expiry ? (
-            <View style={styles.expiryRow}>
-              <Tag size={12} color={COLORS.accentUrgent} />
-              <Text style={styles.expiryText}>Best before {item.expiry}</Text>
+          {timeLeft ? (
+            <View style={styles.surplusTimer}>
+              <Clock size={11} color={COLORS.accentUrgent} />
+              <Text style={styles.surplusTimerText}>{timeLeft} left</Text>
             </View>
           ) : null}
         </View>
@@ -169,14 +127,48 @@ export default function HomeScreen() {
     );
   };
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+  const renderRestaurant = ({ item }: { item: any }) => (
+    <TouchableOpacity
+      testID={`restaurant-card-${item.vendor_id}`}
+      style={styles.restCard}
+      onPress={() => router.push(`/restaurant/${item.vendor_id}`)}
+      activeOpacity={0.85}
+    >
+      {item.logo_url ? (
+        <Image source={{ uri: item.logo_url }} style={styles.restLogo} />
+      ) : (
+        <View style={[styles.restLogo, styles.restLogoPlaceholder]}>
+          <Text style={styles.restLogoInitial}>{(item.name || '?').charAt(0).toUpperCase()}</Text>
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text style={styles.restName} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.restCategory} numberOfLines={1}>{item.category}</Text>
+        <View style={styles.restMetaRow}>
+          {item.distance != null ? (
+            <View style={styles.restMeta}>
+              <MapPin size={12} color={COLORS.textMuted} />
+              <Text style={styles.restMetaText}>{item.distance} km</Text>
+            </View>
+          ) : null}
+          {item.surplus_count > 0 ? (
+            <View style={styles.surplusPill}>
+              <Sparkles size={11} color={COLORS.primary} />
+              <Text style={styles.surplusPillText}>{item.surplus_count} surplus</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+      <ChevronRight size={20} color={COLORS.textMuted} />
+    </TouchableOpacity>
+  );
+
+  const ListHeader = (
+    <View>
       {/* Header */}
       <View style={styles.headerSection}>
-        <View>
-          <Text style={styles.greeting}>Perfectly Good</Text>
-          <Text style={styles.subGreeting}>Rescue delicious surplus food nearby</Text>
-        </View>
+        <Text style={styles.greeting}>Perfectly Good</Text>
+        <Text style={styles.subGreeting}>Rescue surplus food & order from restaurants nearby</Text>
       </View>
 
       {/* Search */}
@@ -229,47 +221,75 @@ export default function HomeScreen() {
               </TouchableOpacity>
             ))}
           </ScrollView>
-
-          <Text style={[styles.filterLabel, { marginTop: SPACING.sm }]}>Sort By</Text>
-          <View style={styles.chipRow}>
-            {[{ label: 'Price', value: 'price' }, { label: 'Discount', value: 'discount' }].map((s) => (
-              <TouchableOpacity
-                key={s.value}
-                testID={`sort-${s.value}`}
-                style={[styles.chip, sortBy === s.value && styles.chipActive]}
-                onPress={() => setSortBy(sortBy === s.value ? '' : s.value)}
-              >
-                <Text style={[styles.chipText, sortBy === s.value && styles.chipTextActive]}>{s.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
         </View>
       )}
 
-      {/* Drop List */}
-      {loading && !refreshing ? (
-        <View style={styles.centerLoader}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
+      {/* Surplus Deals */}
+      <View style={styles.sectionHead}>
+        <View style={styles.sectionTitleRow}>
+          <Sparkles size={18} color={COLORS.primary} />
+          <Text style={styles.sectionTitle}>Surplus Deals</Text>
+        </View>
+        <Text style={styles.sectionSub}>Up to 70% off — rescue before it's gone</Text>
+      </View>
+      {drops.length === 0 ? (
+        <View style={styles.surplusEmpty}>
+          <Text style={styles.surplusEmptyText}>No surplus deals right now. Check back soon!</Text>
         </View>
       ) : (
         <FlatList
-          testID="drops-list"
+          testID="surplus-list"
           data={drops}
-          renderItem={renderDrop}
+          renderItem={renderSurplusCard}
           keyExtractor={(item) => item.item_id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No drops available</Text>
-              <Text style={styles.emptySubtitle}>Check back soon for fresh surplus deals!</Text>
-            </View>
-          }
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.surplusListContent}
         />
       )}
+
+      {/* Nearby Restaurants heading */}
+      <View style={styles.sectionHead}>
+        <View style={styles.sectionTitleRow}>
+          <Store size={18} color={COLORS.textPrimary} />
+          <Text style={styles.sectionTitle}>Nearby Restaurants</Text>
+        </View>
+        <Text style={styles.sectionSub}>Order Surplus, Takeaway or Dine-in</Text>
+      </View>
+    </View>
+  );
+
+  if (loading && !refreshing) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        {ListHeader}
+        <View style={styles.centerLoader}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <FlatList
+        testID="restaurants-list"
+        data={restaurants}
+        renderItem={renderRestaurant}
+        keyExtractor={(item) => item.vendor_id}
+        ListHeaderComponent={ListHeader}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No restaurants found</Text>
+            <Text style={styles.emptySubtitle}>Try adjusting your search or filters.</Text>
+          </View>
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -308,41 +328,54 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: COLORS.primary },
   chipText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
   chipTextActive: { color: '#fff' },
-  centerLoader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  listContent: { paddingHorizontal: SPACING.md, paddingBottom: SPACING.xxl },
-  card: {
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg,
-    marginBottom: SPACING.md, overflow: 'hidden', ...SHADOWS.medium,
+  centerLoader: { paddingVertical: 60, alignItems: 'center' },
+  listContent: { paddingBottom: SPACING.xxl },
+
+  sectionHead: { paddingHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: SPACING.sm },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  sectionTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  sectionSub: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
+
+  surplusListContent: { paddingHorizontal: SPACING.md, gap: SPACING.md, paddingBottom: SPACING.xs },
+  surplusEmpty: { marginHorizontal: SPACING.md, backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.lg, ...SHADOWS.small },
+  surplusEmptyText: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textAlign: 'center' },
+  surplusCard: {
+    width: 190, backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, overflow: 'hidden',
+    borderWidth: 1, borderColor: COLORS.primary + '22', ...SHADOWS.small,
   },
-  imageContainer: { position: 'relative' },
-  cardImage: { width: '100%', height: 180, backgroundColor: COLORS.skeleton },
+  surplusImage: { width: '100%', height: 110, backgroundColor: COLORS.skeleton },
   discountBadge: {
     position: 'absolute', top: SPACING.sm, left: SPACING.sm,
     backgroundColor: COLORS.primary, borderRadius: RADIUS.full,
-    paddingHorizontal: SPACING.sm + 2, paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.sm, paddingVertical: 3,
   },
-  discountBadgeText: { color: '#fff', fontSize: 12, fontFamily: 'DMSans_700Bold' },
-  quantityBadge: {
-    position: 'absolute', top: SPACING.sm, right: SPACING.sm,
-    backgroundColor: COLORS.accentUrgent, borderRadius: RADIUS.full,
-    paddingHorizontal: SPACING.sm + 2, paddingVertical: SPACING.xs,
+  discountBadgeText: { color: '#fff', fontSize: 11, fontFamily: 'DMSans_700Bold' },
+  surplusBody: { padding: SPACING.sm + 2 },
+  surplusName: { fontSize: 15, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
+  surplusVendor: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 1 },
+  surplusPriceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs, marginTop: 6 },
+  surplusPrice: { fontSize: 17, fontFamily: 'Outfit_700Bold', color: COLORS.primary },
+  surplusStrike: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textDecorationLine: 'line-through' },
+  surplusTimer: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  surplusTimerText: { fontSize: 11.5, fontFamily: 'DMSans_700Bold', color: COLORS.accentUrgent },
+
+  restCard: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg,
+    padding: SPACING.sm + 2, marginHorizontal: SPACING.md, marginBottom: SPACING.sm, ...SHADOWS.small,
   },
-  quantityBadgeText: { color: '#fff', fontSize: 12, fontFamily: 'DMSans_700Bold' },
-  cardContent: { padding: SPACING.md },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.xs },
-  vendorCategory: { fontSize: 12, fontFamily: 'DMSans_700Bold', color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 1 },
-  timerRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  timerText: { fontSize: 12, fontFamily: 'DMSans_700Bold', color: COLORS.accentUrgent },
-  cardTitle: { fontSize: 18, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginBottom: 2 },
-  vendorName: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginBottom: SPACING.sm },
-  priceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.xs },
-  discountedPrice: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.primary },
-  originalPrice: { fontSize: 15, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textDecorationLine: 'line-through' },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  locationText: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, flex: 1 },
-  expiryRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: SPACING.xs },
-  expiryText: { fontSize: 12, fontFamily: 'DMSans_500Medium', color: COLORS.accentUrgent },
-  emptyState: { alignItems: 'center', paddingTop: 80 },
+  restLogo: { width: 60, height: 60, borderRadius: RADIUS.md, backgroundColor: COLORS.skeleton },
+  restLogoPlaceholder: { backgroundColor: COLORS.primaryDark, justifyContent: 'center', alignItems: 'center' },
+  restLogoInitial: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: '#fff' },
+  restName: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
+  restCategory: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 1 },
+  restMetaRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginTop: 6, flexWrap: 'wrap' },
+  restMeta: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  restMetaText: { fontSize: 12, fontFamily: 'DMSans_500Medium', color: COLORS.textMuted },
+  surplusPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: COLORS.primary + '15', borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm, paddingVertical: 2 },
+  surplusPillText: { fontSize: 11.5, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
+
+  emptyState: { alignItems: 'center', paddingTop: 40 },
   emptyTitle: { fontSize: 20, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginBottom: SPACING.xs },
   emptySubtitle: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary },
 });

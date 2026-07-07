@@ -1,0 +1,45 @@
+{
+  "summary": "Tested new order-type feature (Surplus / Takeaway / Dine-in) end-to-end. Backend: 15/15 pytest cases passed covering GET /api/restaurants (sorted surplus-first, distance), GET /api/restaurants/{id} (surplus_items with discount + menu_items at original price), POST /api/orders/create with all three order_types + correct amount in paise, POST /api/orders/verify persistence of order_type and unit_price, surplus quantity decrement, quantity guardrails, and the 30% surplus discount rule (reject <30%, accept exactly 30%). Frontend: customer login works, Home renders 'Surplus Deals' horizontal section (7 cards) + 'Nearby Restaurants' list (3 vendors, sorted with surplus_count pill). Restaurant detail page shows 3 tabs — Surplus (green active by default with 3 items), Takeaway and Dine-in (both show 6 regular menu items at original price ₹100–₹300). Checkout screen shows the order-type badge ('SURPLUS'), correct subtotal/quantity/total, and Pay button. Empty-surplus fallback verified via code inspection (restaurant/[id].tsx lines 160–195) — no live vendor currently has zero surplus, per the review note; DO NOT block on it.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "checkout.tsx (total display)",
+        "issue": "Frontend uses Math.round(subtotal*0.05) for GST and convenience, while backend uses round(x,2). For qty=1 surplus item at ₹210 the UI shows 'Pay ₹232' but backend actually creates Razorpay order for 23100 paise (₹231). This ₹1 mismatch will confuse users at pay time. Reference: /app/frontend/app/checkout.tsx:39-41 vs /app/backend/server.py:635-638.",
+        "testID": "pay-now-btn",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_order_types.py",
+    "/app/test_reports/pytest/pytest_order_types.xml"
+  ],
+  "action_items": [
+    "(Optional) Align GST/convenience rounding between checkout.tsx (Math.round) and backend (round(x,2)) so the displayed total exactly matches the amount charged."
+  ],
+  "critical_code_review_comments": [
+    "server.py list_restaurants sort key uses r['distance'] which can be None when lat/lon absent; handled via `if is not None` fallback to 99999 — OK.",
+    "_menu_public correctly gates discounted fields behind order_type==surplus; menu_items array uses takeaway shape (price==original_price). Good separation.",
+    "create_order enforces available_today only for order_type==surplus; takeaway/dine_in correctly accept any menu item. Quantity check only applied to surplus. Matches spec.",
+    "30% rule in POST /api/vendor/drops uses `> round(op*0.7, 2)` — exactly-30% off is accepted, verified by test."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_order_types.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15)",
+    "frontend": "100% for tested flows (home, restaurant tabs, checkout with order-type badge)"
+  },
+  "seed_data_creation": "None — used existing seeded vendors (Green Leaf Bakery, Spice Garden, Testing). Created two test orders (1 takeaway + 1 surplus) via API which decremented surplus quantity by 1 for Artisan Croissants — main agent may want to re-seed if exact quantities matter.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend test file /app/backend/tests/test_order_types.py covers all order-type flows and 30% rule. Home + restaurant detail + checkout verified via Playwright at mobile viewport 390x844. Empty-surplus fallback (No surplus deals available right now + fallback-takeaway/fallback-dine_in sub-switch) was NOT UI-tested because all seeded vendors have surplus_count > 0; code path verified visually in restaurant/[id].tsx.",
+  "rca_of_issue": "Minor: pay total display drift. Root cause: JS Math.round(x) rounds to nearest integer, but backend uses round(x, 2) preserving 2 decimals; for a subtotal of ₹210, gst=₹10.5 rounds up to ₹11 in JS but stays ₹10.50 in backend. Fix: change checkout.tsx to `const gst = Math.round(subtotal*0.05*100)/100;` and similarly for convenience, then total = subtotal + gst + convenience shown as-is; OR consume backend's `amount` (paise) as source of truth."
+}

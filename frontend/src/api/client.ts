@@ -166,12 +166,26 @@ export const dropsApi = {
   categories: () => apiFetch('/drops/categories'),
 };
 
+// Restaurants endpoints (surplus + takeaway + dine-in)
+export const restaurantsApi = {
+  list: (params: { lat?: number; lon?: number; search?: string; category?: string }) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    });
+    const qs = query.toString();
+    return apiFetch(`/restaurants${qs ? `?${qs}` : ''}`);
+  },
+
+  get: (vendorId: string) => apiFetch(`/restaurants/${vendorId}`),
+};
+
 // Orders endpoints
 export const ordersApi = {
-  create: (data: { food_item_id: string; quantity: number }) =>
+  create: (data: { food_item_id: string; quantity: number; order_type?: string }) =>
     apiFetch('/orders/create', { method: 'POST', body: JSON.stringify(data) }),
 
-  verify: (data: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string; food_item_id: string; quantity: number }) =>
+  verify: (data: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string; food_item_id: string; quantity: number; order_type?: string }) =>
     apiFetch('/orders/verify', { method: 'POST', body: JSON.stringify(data) }),
 
   userOrders: () => apiFetch('/orders/user'),

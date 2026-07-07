@@ -493,12 +493,114 @@ async def get_drop(item_id: str, lat: Optional[float] = None, lon: Optional[floa
     return item_to_drop(item, vendor)
 
 # ══════════════════════════════════════════════════════════════════════════
+#  RESTAURANTS  (customer browse: surplus + takeaway + dine-in)
+# ══════════════════════════════════════════════════════════════════════════
+
+def _vendor_public(v: dict) -> dict:
+    return {
+        "vendor_id": v.get("vendor_id"),
+        "name": v.get("name", ""),
+        "category": v.get("category", ""),
+        "service_type": v.get("service_type", "both"),
+        "location": v.get("location", {}),
+        "logo_url": v.get("logo_url", ""),
+        "pickup_start_time": v.get("pickup_start_time", ""),
+        "pickup_end_time": v.get("pickup_end_time", ""),
+    }
+
+def _menu_public(m: dict, order_type: str) -> dict:
+    """Shape a menu_item for the customer. Surplus uses discounted_price; takeaway/dine-in use the menu (original) price."""
+    op = m.get("original_price") or 0
+    dp = m.get("discounted_price") or 0
+    is_surplus = order_type == "surplus"
+    out = {
+        "menu_item_id": m.get("menu_item_id"),
+        "item_id": m.get("menu_item_id"),
+        "name": m.get("name", ""),
+        "description": m.get("description", ""),
+        "image_url": m.get("image_url", ""),
+        "food_type": m.get("food_type", "veg"),
+        "contains_egg": bool(m.get("contains_egg")),
+        "serving_size": m.get("serving_size", ""),
+        "category": m.get("category", ""),
+        "original_price": op,
+        "price": dp if is_surplus else op,
+        "available_today": bool(m.get("available_today")),
+    }
+    if is_surplus:
+        out["discounted_price"] = dp
+        out["quantity_available"] = m.get("quantity_available")
+        out["expiry"] = m.get("expiry", "")
+        out["discount"] = round(((op - dp) / op) * 100) if op else 0
+    return out
+
+@api.get("/restaurants")
+async def list_restaurants(
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    search: Optional[str] = None,
+    category: Optional[str] = None,
+):
+    query: dict = {"status": {"$ne": "inactive"}}
+    if category:
+        query["category"] = category
+    if search:
+        query["name"] = {"$regex": search, "$options": "i"}
+    vendors = await db.vendors.find(query, {"_id": 0}).to_list(500)
+    vendor_ids = [v["vendor_id"] for v in vendors]
+
+    counts: dict = {}
+    if vendor_ids:
+        pipeline = [
+            {"$match": {"vendor_id": {"$in": vendor_ids}}},
+            {"$group": {
+                "_id": "$vendor_id",
+                "menu_count": {"$sum": 1},
+                "surplus_count": {"$sum": {"$cond": [{"$eq": ["$available_today", True]}, 1, 0]}},
+            }},
+        ]
+        async for row in db.menu_items.aggregate(pipeline):
+            counts[row["_id"]] = {"menu_count": row["menu_count"], "surplus_count": row["surplus_count"]}
+
+    out = []
+    for v in vendors:
+        pub = _vendor_public(v)
+        c = counts.get(v["vendor_id"], {})
+        pub["menu_count"] = c.get("menu_count", 0)
+        pub["surplus_count"] = c.get("surplus_count", 0)
+        loc = v.get("location", {}) or {}
+        if lat is not None and lon is not None and loc.get("lat") and loc.get("lon"):
+            pub["distance"] = round(haversine(lat, lon, loc["lat"], loc["lon"]), 1)
+        else:
+            pub["distance"] = None
+        out.append(pub)
+
+    # Restaurants with active surplus deals first, then nearest
+    out.sort(key=lambda r: (0 if r["surplus_count"] > 0 else 1, r["distance"] if r["distance"] is not None else 99999))
+    return out
+
+@api.get("/restaurants/{vendor_id}")
+async def get_restaurant(vendor_id: str):
+    v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not v or v.get("status") == "inactive":
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    items = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(1000)
+    surplus_items = [_menu_public(m, "surplus") for m in items if m.get("available_today")]
+    menu_items = [_menu_public(m, "takeaway") for m in items]
+    return {
+        "vendor": _vendor_public(v),
+        "surplus_items": surplus_items,
+        "menu_items": menu_items,
+    }
+
+# ══════════════════════════════════════════════════════════════════════════
 #  ORDERS
 # ══════════════════════════════════════════════════════════════════════════
 
 class CreateOrderBody(BaseModel):
     food_item_id: str
     quantity: int
+    order_type: Optional[str] = "surplus"  # "surplus" | "takeaway" | "dine_in"
 
 class VerifyOrderBody(BaseModel):
     razorpay_order_id: str
@@ -506,19 +608,30 @@ class VerifyOrderBody(BaseModel):
     razorpay_signature: str
     food_item_id: str
     quantity: int
+    order_type: Optional[str] = "surplus"
 
 @api.post("/orders/create")
 async def create_order(body: CreateOrderBody, request: Request):
     user = await get_current_user(request)
-    item = await db.menu_items.find_one({"menu_item_id": body.food_item_id, "available_today": True}, {"_id": 0})
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not available")
-    qty_avail = item.get("quantity_available")
-    if qty_avail is not None and body.quantity > qty_avail:
-        raise HTTPException(status_code=400, detail="Not enough quantity available")
+    order_type = body.order_type if body.order_type in ("surplus", "takeaway", "dine_in") else "surplus"
+
+    if order_type == "surplus":
+        item = await db.menu_items.find_one({"menu_item_id": body.food_item_id, "available_today": True}, {"_id": 0})
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not available")
+        qty_avail = item.get("quantity_available")
+        if qty_avail is not None and body.quantity > qty_avail:
+            raise HTTPException(status_code=400, detail="Not enough quantity available")
+        unit_price = item.get("discounted_price") or 0
+    else:
+        # Takeaway / Dine-in: order from the regular menu at menu (original) price
+        item = await db.menu_items.find_one({"menu_item_id": body.food_item_id}, {"_id": 0})
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+        unit_price = item.get("original_price") or item.get("discounted_price") or 0
 
     cfg = await get_settings_doc()
-    subtotal = item["discounted_price"] * body.quantity
+    subtotal = unit_price * body.quantity
     gst = round(subtotal * cfg.get("gst_rate", 0.05), 2)
     convenience_fee = round(subtotal * cfg.get("convenience_rate", 0.05), 2)
     total = round(subtotal + gst + convenience_fee, 2)
@@ -531,6 +644,8 @@ async def create_order(body: CreateOrderBody, request: Request):
         "user_id": user["user_id"],
         "food_item_id": body.food_item_id,
         "quantity": body.quantity,
+        "order_type": order_type,
+        "unit_price": round(unit_price, 2),
         "item_subtotal": round(subtotal, 2),
         "total_amount": total,
         "created_at": datetime.now(timezone.utc),
@@ -556,6 +671,8 @@ async def verify_order(body: VerifyOrderBody, request: Request):
     vendor = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
 
     order_id = gen_id("order")
+    order_type = pending.get("order_type", "surplus")
+    unit_price = pending.get("unit_price", item.get("discounted_price", 0))
     order_doc = {
         "order_id": order_id,
         "user_id": user["user_id"],
@@ -565,8 +682,9 @@ async def verify_order(body: VerifyOrderBody, request: Request):
         "vendor_id": item.get("vendor_id", ""),
         "vendor_name": vendor.get("name", "") if vendor else "",
         "quantity": body.quantity,
-        "discounted_price": item.get("discounted_price", 0),
-        "item_subtotal": pending.get("item_subtotal", round(item.get("discounted_price", 0) * body.quantity, 2)),
+        "order_type": order_type,
+        "discounted_price": unit_price,
+        "item_subtotal": pending.get("item_subtotal", round(unit_price * body.quantity, 2)),
         "total_amount": pending.get("total_amount", 0),
         "status": "reserved",
         "pickup_start_time": vendor.get("pickup_start_time", "") if vendor else "",
@@ -577,8 +695,8 @@ async def verify_order(body: VerifyOrderBody, request: Request):
     }
     await db.orders.insert_one(order_doc)
 
-    # Decrement available quantity (if tracked)
-    if item.get("quantity_available") is not None:
+    # Decrement available quantity for surplus listings only (if tracked)
+    if order_type == "surplus" and item.get("quantity_available") is not None:
         await db.menu_items.update_one(
             {"menu_item_id": body.food_item_id},
             {"$inc": {"quantity_available": -body.quantity}},
@@ -724,6 +842,14 @@ async def create_vendor_drop(body: CreateDropBody, request: Request):
     menu_item = await db.menu_items.find_one({"menu_item_id": body.menu_item_id, "vendor_id": vendor["vendor_id"]}, {"_id": 0})
     if not menu_item:
         raise HTTPException(status_code=404, detail="Menu item not found")
+
+    # Surplus listings must be at least 30% off the regular menu (dine-in) price
+    op = menu_item.get("original_price") or 0
+    if op > 0 and body.discounted_price > round(op * 0.7, 2):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Surplus price must be at least 30% off the menu price of ₹{op:.0f} (₹{round(op * 0.7):.0f} or less).",
+        )
 
     updates = {
         "discounted_price": body.discounted_price,
