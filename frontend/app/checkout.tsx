@@ -77,7 +77,7 @@ export default function CheckoutScreen() {
       <div class="loading"><p>Opening payment...</p></div>
       <script>
         var options = {
-          key: '${RAZORPAY_KEY}',
+          key: '${razorpayData.key_id || RAZORPAY_KEY}',
           amount: ${razorpayData.amount},
           currency: 'INR',
           order_id: '${razorpayData.razorpay_order_id}',

@@ -29,10 +29,22 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE = timedelta(hours=24)
 REFRESH_TOKEN_EXPIRE = timedelta(days=7)
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "rzp_test_SSfFeyx6ytVg0B")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# ── Razorpay client ─────────────────────────────────────────────────────
+import razorpay
+razorpay_client = None
+if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+    try:
+        razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+        logger.info(f"Razorpay client initialized ({'LIVE' if RAZORPAY_KEY_ID.startswith('rzp_live') else 'TEST'} mode)")
+    except Exception as e:
+        logger.error(f"Razorpay client init failed: {e}")
+
 
 # ── MongoDB ─────────────────────────────────────────────────────────────
 mongo_client = AsyncIOMotorClient(MONGO_URL)
@@ -631,13 +643,27 @@ async def create_order(body: CreateOrderBody, request: Request):
         unit_price = item.get("original_price") or item.get("discounted_price") or 0
 
     cfg = await get_settings_doc()
-    subtotal = unit_price * body.quantity
+    subtotal = round(unit_price * body.quantity, 2)
     gst = round(subtotal * cfg.get("gst_rate", 0.05), 2)
     convenience_fee = round(subtotal * cfg.get("convenience_rate", 0.05), 2)
     total = round(subtotal + gst + convenience_fee, 2)
-    amount_paise = int(total * 100)
+    amount_paise = int(round(total, 2) * 100)
 
-    razorpay_order_id = f"order_{secrets.token_hex(12)}"
+    # Create a real Razorpay order so the checkout can process the payment
+    if not razorpay_client:
+        raise HTTPException(status_code=503, detail="Payments are not configured. Please try again later.")
+    try:
+        rzp_order = razorpay_client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": f"rcpt_{secrets.token_hex(6)}",  # must be <= 40 chars
+            "payment_capture": 1,
+        })
+    except Exception as e:
+        logger.error(f"Razorpay order create failed: {e}")
+        raise HTTPException(status_code=502, detail="Could not start payment. Please try again.")
+
+    razorpay_order_id = rzp_order["id"]
 
     await db.pending_orders.insert_one({
         "razorpay_order_id": razorpay_order_id,
@@ -663,6 +689,19 @@ async def verify_order(body: VerifyOrderBody, request: Request):
     pending = await db.pending_orders.find_one({"razorpay_order_id": body.razorpay_order_id}, {"_id": 0})
     if not pending:
         raise HTTPException(status_code=400, detail="Order not found")
+
+    # Verify the Razorpay payment signature (HMAC SHA256 of order_id|payment_id)
+    if not razorpay_client:
+        raise HTTPException(status_code=503, detail="Payments are not configured.")
+    try:
+        razorpay_client.utility.verify_payment_signature({
+            "razorpay_order_id": body.razorpay_order_id,
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "razorpay_signature": body.razorpay_signature,
+        })
+    except Exception as e:
+        logger.warning(f"Razorpay signature verification failed: {e}")
+        raise HTTPException(status_code=400, detail="Payment verification failed")
 
     item = await db.menu_items.find_one({"menu_item_id": body.food_item_id}, {"_id": 0})
     if not item:
