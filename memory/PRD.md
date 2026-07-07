@@ -42,6 +42,17 @@
 - Signup now collects phone number (required, min 10 digits), stored on user; returned in user_response.
 - Vendor create-drop: added "Best Before / Expiry" selectable option (Today/Tomorrow/In 2 days/In 3 days), stored on drop, shown on drop detail.
 
+## Order Types — Surplus / Takeaway / Dine-in (July 2026)
+- Three customer order types: **Surplus** (primary, discounted), **Takeaway**, **Dine-in**.
+- Home screen: "Surplus Deals" horizontal section at top + "Nearby Restaurants" list (surplus-first, distance sorted).
+- New Restaurant page `/restaurant/[id]` with 3 tabs (Surplus default w/ green accent, Takeaway, Dine-in).
+  - Surplus tab shows `available_today` items at discounted price. If none: shows "No surplus deals available right now" and auto-renders the regular menu with a Takeaway/Dine-in sub-switch.
+  - Takeaway & Dine-in show the full menu at the item's original (menu) price.
+- Pricing rule: **Surplus listings must be ≥30% off** the menu price — enforced in POST /api/vendor/drops (400 otherwise).
+- New endpoints: `GET /api/restaurants`, `GET /api/restaurants/{vendor_id}`.
+- `order_type` added to POST /api/orders/create + /verify and persisted on orders; quantity decremented only for surplus. My Orders shows an order-type badge.
+- Same Razorpay pay-now flow for all order types; checkout shows an order-type badge and hides "You save" for non-surplus.
+
 ## Screens (12 total)
 - Login/Register, Forgot Password
 - Home Feed (search + filters), Drop Detail, Checkout (Razorpay WebView)

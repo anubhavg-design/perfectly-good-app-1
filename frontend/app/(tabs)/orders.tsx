@@ -23,10 +23,13 @@ interface Order {
   quantity: number;
   total_amount: number;
   status: string;
+  order_type?: string;
   pickup_start_time: string;
   pickup_end_time: string;
   created_at: string;
 }
+
+const ORDER_TYPE_LABELS: Record<string, string> = { surplus: 'Surplus', takeaway: 'Takeaway', dine_in: 'Dine-in' };
 
 export default function OrdersScreen() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -92,7 +95,14 @@ export default function OrdersScreen() {
       <View testID={`order-card-${item.order_id}`} style={styles.card}>
         <View style={styles.cardTop}>
           <View style={styles.orderInfo}>
-            <Text style={styles.orderName} numberOfLines={1}>{item.food_item_name}</Text>
+            <View style={styles.orderTitleRow}>
+              <Text style={styles.orderName} numberOfLines={1}>{item.food_item_name}</Text>
+              <View style={[styles.typePill, item.order_type === 'surplus' ? styles.typePillSurplus : styles.typePillNeutral]}>
+                <Text style={[styles.typePillText, item.order_type === 'surplus' ? { color: COLORS.primary } : { color: COLORS.textSecondary }]}>
+                  {ORDER_TYPE_LABELS[item.order_type || 'surplus'] || 'Surplus'}
+                </Text>
+              </View>
+            </View>
             <Text style={styles.orderVendor}>{item.vendor_name}</Text>
             <Text style={styles.orderDate}>{date}</Text>
           </View>
@@ -175,7 +185,12 @@ const styles = StyleSheet.create({
   },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: SPACING.sm },
   orderInfo: { flex: 1, marginRight: SPACING.sm },
-  orderName: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
+  orderTitleRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  orderName: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, flexShrink: 1 },
+  typePill: { borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm, paddingVertical: 2 },
+  typePillSurplus: { backgroundColor: COLORS.primary + '18' },
+  typePillNeutral: { backgroundColor: COLORS.borderLight },
+  typePillText: { fontSize: 10.5, fontFamily: 'DMSans_700Bold', textTransform: 'uppercase', letterSpacing: 0.4 },
   orderVendor: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
   orderDate: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, marginTop: 2 },
   statusBadge: {

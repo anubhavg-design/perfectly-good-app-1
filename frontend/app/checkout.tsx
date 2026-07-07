@@ -32,13 +32,15 @@ export default function CheckoutScreen() {
   const orderType = (params.orderType as string) || 'surplus';
   const ORDER_LABELS: Record<string, string> = { surplus: 'Surplus', takeaway: 'Takeaway', dine_in: 'Dine-in' };
   const orderLabel = ORDER_LABELS[orderType] || 'Surplus';
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const money = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
   const price = Number(params.price);
   const originalPrice = Number(params.originalPrice);
   const maxQty = Number(params.maxQty) > 0 ? Number(params.maxQty) : 99;
-  const subtotal = price * quantity;
-  const gst = Math.round(subtotal * 0.05);
-  const convenienceFee = Math.round(subtotal * 0.05);
-  const total = subtotal + gst + convenienceFee;
+  const subtotal = round2(price * quantity);
+  const gst = round2(subtotal * 0.05);
+  const convenienceFee = round2(subtotal * 0.05);
+  const total = round2(subtotal + gst + convenienceFee);
   const totalSavings = (originalPrice - price) * quantity;
 
   const handleReserve = async () => {
@@ -223,20 +225,20 @@ export default function CheckoutScreen() {
           <View style={styles.priceCard}>
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>Subtotal ({quantity} × ₹{price})</Text>
-              <Text style={styles.priceValue}>₹{subtotal}</Text>
+              <Text style={styles.priceValue}>₹{money(subtotal)}</Text>
             </View>
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>GST</Text>
-              <Text style={styles.priceValue}>₹{gst}</Text>
+              <Text style={styles.priceValue}>₹{money(gst)}</Text>
             </View>
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>Convenience Fee</Text>
-              <Text style={styles.priceValue}>₹{convenienceFee}</Text>
+              <Text style={styles.priceValue}>₹{money(convenienceFee)}</Text>
             </View>
             <View style={styles.divider} />
             <View style={styles.priceRow}>
               <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalValue}>₹{total}</Text>
+              <Text style={styles.totalValue}>₹{money(total)}</Text>
             </View>
             {totalSavings > 0 ? (
               <View style={[styles.savingsRow]}>
@@ -265,7 +267,7 @@ export default function CheckoutScreen() {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.payBtnText}>Pay ₹{total}</Text>
+            <Text style={styles.payBtnText}>Pay ₹{money(total)}</Text>
           )}
         </TouchableOpacity>
       </View>
