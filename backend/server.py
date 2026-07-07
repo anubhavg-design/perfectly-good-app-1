@@ -5,6 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 import os
+import json
 import logging
 import uuid
 import secrets
@@ -683,11 +684,78 @@ async def create_order(body: CreateOrderBody, request: Request):
         "amount": amount_paise,
     }
 
+async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optional[str]:
+    """Create the confirmed order from a pending order. Idempotent: if an order
+    for this razorpay_order_id already exists, it is returned without duplication.
+    Used by both /orders/verify (client callback) and the Razorpay webhook."""
+    rzp_order_id = pending.get("razorpay_order_id")
+
+    # Idempotency guard — never create two orders for the same payment
+    existing = await db.orders.find_one({"razorpay_order_id": rzp_order_id}, {"_id": 0})
+    if existing:
+        await db.pending_orders.delete_one({"razorpay_order_id": rzp_order_id})
+        return existing.get("order_id")
+
+    item = await db.menu_items.find_one({"menu_item_id": pending.get("food_item_id")}, {"_id": 0})
+    if not item:
+        return None
+    vendor = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
+    order_user = await db.users.find_one({"user_id": pending.get("user_id")}, {"_id": 0}) or {}
+
+    order_id = gen_id("order")
+    order_type = pending.get("order_type", "surplus")
+    quantity = pending.get("quantity", 1)
+    unit_price = pending.get("unit_price", item.get("discounted_price", 0))
+    order_doc = {
+        "order_id": order_id,
+        "user_id": pending.get("user_id"),
+        "user_name": order_user.get("name", ""),
+        "food_item_id": pending.get("food_item_id"),
+        "food_item_name": item.get("name", ""),
+        "vendor_id": item.get("vendor_id", ""),
+        "vendor_name": vendor.get("name", "") if vendor else "",
+        "quantity": quantity,
+        "order_type": order_type,
+        "discounted_price": unit_price,
+        "item_subtotal": pending.get("item_subtotal", round(unit_price * quantity, 2)),
+        "total_amount": pending.get("total_amount", 0),
+        "status": "reserved",
+        "pickup_start_time": vendor.get("pickup_start_time", "") if vendor else "",
+        "pickup_end_time": vendor.get("pickup_end_time", "") if vendor else "",
+        "razorpay_order_id": rzp_order_id,
+        "razorpay_payment_id": razorpay_payment_id,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.orders.insert_one(order_doc)
+
+    # Decrement available quantity for surplus listings only (if tracked)
+    if order_type == "surplus" and item.get("quantity_available") is not None:
+        await db.menu_items.update_one(
+            {"menu_item_id": pending.get("food_item_id")},
+            {"$inc": {"quantity_available": -quantity}},
+        )
+    await db.vendors.update_one({"vendor_id": item.get("vendor_id", "")}, {"$set": {"last_order_date": datetime.now(timezone.utc)}})
+    await db.pending_orders.delete_one({"razorpay_order_id": rzp_order_id})
+
+    # Send push notification to vendor
+    await send_push_to_vendor(
+        vendor_id=item.get("vendor_id", ""),
+        title="New Order!",
+        body=f"{order_user.get('name', 'A customer')} reserved {quantity}× {item.get('name', 'item')} — ₹{pending.get('total_amount', 0)}",
+        data={"order_id": order_id, "type": "new_order"},
+    )
+    return order_id
+
+
 @api.post("/orders/verify")
 async def verify_order(body: VerifyOrderBody, request: Request):
     user = await get_current_user(request)
     pending = await db.pending_orders.find_one({"razorpay_order_id": body.razorpay_order_id}, {"_id": 0})
     if not pending:
+        # Webhook may have already finalized this order
+        existing = await db.orders.find_one({"razorpay_order_id": body.razorpay_order_id}, {"_id": 0})
+        if existing:
+            return {"message": "Order confirmed", "order_id": existing.get("order_id")}
         raise HTTPException(status_code=400, detail="Order not found")
 
     # Verify the Razorpay payment signature (HMAC SHA256 of order_id|payment_id)
@@ -703,55 +771,63 @@ async def verify_order(body: VerifyOrderBody, request: Request):
         logger.warning(f"Razorpay signature verification failed: {e}")
         raise HTTPException(status_code=400, detail="Payment verification failed")
 
-    item = await db.menu_items.find_one({"menu_item_id": body.food_item_id}, {"_id": 0})
-    if not item:
+    order_id = await _finalize_order(pending, body.razorpay_payment_id)
+    if not order_id:
         raise HTTPException(status_code=404, detail="Item not found")
-
-    vendor = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
-
-    order_id = gen_id("order")
-    order_type = pending.get("order_type", "surplus")
-    unit_price = pending.get("unit_price", item.get("discounted_price", 0))
-    order_doc = {
-        "order_id": order_id,
-        "user_id": user["user_id"],
-        "user_name": user.get("name", ""),
-        "food_item_id": body.food_item_id,
-        "food_item_name": item.get("name", ""),
-        "vendor_id": item.get("vendor_id", ""),
-        "vendor_name": vendor.get("name", "") if vendor else "",
-        "quantity": body.quantity,
-        "order_type": order_type,
-        "discounted_price": unit_price,
-        "item_subtotal": pending.get("item_subtotal", round(unit_price * body.quantity, 2)),
-        "total_amount": pending.get("total_amount", 0),
-        "status": "reserved",
-        "pickup_start_time": vendor.get("pickup_start_time", "") if vendor else "",
-        "pickup_end_time": vendor.get("pickup_end_time", "") if vendor else "",
-        "razorpay_order_id": body.razorpay_order_id,
-        "razorpay_payment_id": body.razorpay_payment_id,
-        "created_at": datetime.now(timezone.utc),
-    }
-    await db.orders.insert_one(order_doc)
-
-    # Decrement available quantity for surplus listings only (if tracked)
-    if order_type == "surplus" and item.get("quantity_available") is not None:
-        await db.menu_items.update_one(
-            {"menu_item_id": body.food_item_id},
-            {"$inc": {"quantity_available": -body.quantity}},
-        )
-    await db.vendors.update_one({"vendor_id": item.get("vendor_id", "")}, {"$set": {"last_order_date": datetime.now(timezone.utc)}})
-    await db.pending_orders.delete_one({"razorpay_order_id": body.razorpay_order_id})
-
-    # Send push notification to vendor
-    await send_push_to_vendor(
-        vendor_id=item.get("vendor_id", ""),
-        title="New Order!",
-        body=f"{user.get('name', 'A customer')} reserved {body.quantity}× {item.get('name', 'item')} — ₹{pending.get('total_amount', 0)}",
-        data={"order_id": order_id, "type": "new_order"},
-    )
-
     return {"message": "Order confirmed", "order_id": order_id}
+
+
+@api.post("/webhooks/razorpay")
+async def razorpay_webhook(request: Request):
+    """Server-to-server confirmation from Razorpay. Reliably finalizes an order
+    even if the app is closed before /orders/verify runs. Configure this URL and
+    a secret in the Razorpay Dashboard (events: payment.captured, order.paid)."""
+    raw = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+    webhook_secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
+
+    if not webhook_secret or not razorpay_client:
+        logger.error("Razorpay webhook received but RAZORPAY_WEBHOOK_SECRET is not set")
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+
+    try:
+        razorpay_client.utility.verify_webhook_signature(raw.decode("utf-8"), signature, webhook_secret)
+    except Exception as e:
+        logger.warning(f"Razorpay webhook signature verification failed: {e}")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+
+    event = payload.get("event", "")
+    # Extract the order id + payment id from either payment or order entity
+    rzp_order_id = ""
+    payment_id = ""
+    try:
+        if event in ("payment.captured", "payment.authorized"):
+            entity = payload["payload"]["payment"]["entity"]
+            rzp_order_id = entity.get("order_id", "")
+            payment_id = entity.get("id", "")
+        elif event == "order.paid":
+            order_entity = payload["payload"]["order"]["entity"]
+            rzp_order_id = order_entity.get("id", "")
+            payment_id = payload.get("payload", {}).get("payment", {}).get("entity", {}).get("id", "")
+    except Exception:
+        pass
+
+    if not rzp_order_id:
+        return {"status": "ignored"}
+
+    pending = await db.pending_orders.find_one({"razorpay_order_id": rzp_order_id}, {"_id": 0})
+    if pending:
+        order_id = await _finalize_order(pending, payment_id)
+        logger.info(f"Webhook finalized order {order_id} for {rzp_order_id} ({event})")
+        return {"status": "processed", "order_id": order_id}
+    return {"status": "already_processed_or_unknown"}
+
+
 
 @api.get("/orders/user")
 async def user_orders(request: Request):
