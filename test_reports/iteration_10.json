@@ -1,0 +1,26 @@
+{
+  "summary": "Frontend-only regression verification on the login screen (index.tsx) after adding autofill-disabling props (textContentType='none', autoComplete='off', importantForAutofill='no') on BOTH email and password TextInputs. Tested on Expo web preview at 375x667 mobile viewport. All 6 requested scenarios PASS: (1) staff kavyashetty975@gmail.com/123456 logs in and routes to /ops, (2) trailing-space password '123456 ' still logs in (client trim confirmed — DOM value was '123456 ' before submit and backend accepted), (3) '  KAVYASHETTY975@GMAIL.COM  ' + 123456 logs in (client trim+lowercase confirmed), (4) customer@demo.com/customer123 routes to /home, (5) wrong password shows 'Invalid email or password' banner and stays on login, (6) DOM inspection confirms password-input renders with autocomplete='off', autocapitalize='none', autocorrect='off', spellcheck='false', type='password' and email-input renders with autocomplete='off', autocapitalize='none', autocorrect='off', spellcheck='false', type='email' — no runtime errors and no red-screen. Zero page errors. Only benign console warnings observed (expo-notifications web unsupported, deprecated shadow* style prop, deprecated props.pointerEvents) — pre-existing, unrelated to this change. Note: the actual autofill-override bug can only be visually validated on a physical Android/iOS device or Expo Go — the web preview does not exercise native OS password autofill.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "None from testing agent — the web regression check is clean. Main agent must verify the native autofill fix on a real Android device (Expo Go) and iPhone (Expo Go) with kavyashetty975@gmail.com / 123456 to confirm the OS-level password autofill no longer overrides the typed value."
+  ],
+  "critical_code_review_comments": [
+    "/app/frontend/app/index.tsx: password-input and email-input both set textContentType='none', autoComplete='off', importantForAutofill='no' — matches the described fix. Password field also toggles keyboardType='visible-password' when the eye is opened. On web these props render as autocomplete='off' which correctly disables browser autofill (verified via DOM).",
+    "handleSubmit still does email.trim().toLowerCase() and password.trim() before calling login() — trailing-space and uppercase-email tests both succeed end-to-end.",
+    "Pre-existing benign console warnings: 'shadow* style props are deprecated. Use boxShadow' and 'props.pointerEvents is deprecated. Use style.pointerEvents' — not blocking; from RN Web upstream. Consider a separate cleanup pass."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only per request)", "frontend": "100% (6/6 scenarios passed on web preview)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login field testIDs: email-input, password-input, auth-submit-btn, toggle-password, login-tab, register-tab, forgot-password-link. AsyncStorage on web is backed by localStorage AND may use IndexedDB; to force login screen between tests use Playwright add_init_script to clear localStorage, sessionStorage and IndexedDB before every navigation, then goto about:blank -> goto /. Staff role 'operations' (kavyashetty975@gmail.com) routes to /ops; customers route to /home (which is the tabs group /(tabs)/home resolving to /home on web). Error banner selector: find a leaf div/span whose textContent contains 'Invalid'. The web preview cannot exercise native OS password autofill, so the true root-cause validation must happen on Expo Go / native builds.",
+  "rca_of_issue": "Prior RCA (iteration 9): Android soft-keyboard was inserting a trailing space into the password field; fix was password.trim() in handleSubmit. New change under test: to also block native OS password autofill from overriding the manually-typed value on Android AND iOS Expo Go, both email and password TextInputs now set textContentType='none', autoComplete='off', importantForAutofill='no'. Web-preview verification: DOM confirms autocomplete='off' on both inputs, and all 6 requested login/negative scenarios still succeed. Native-device verification remains the responsibility of the main agent (Expo Go / physical device)."
+}

@@ -164,6 +164,10 @@ export default function AuthScreen() {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                spellCheck={false}
+                textContentType="none"
+                autoComplete="off"
+                importantForAutofill="no"
               />
             </View>
 
@@ -197,8 +201,9 @@ export default function AuthScreen() {
                   autoCapitalize="none"
                   autoCorrect={false}
                   spellCheck={false}
-                  textContentType="password"
-                  autoComplete={isLogin ? 'current-password' : 'new-password'}
+                  textContentType="none"
+                  autoComplete="off"
+                  importantForAutofill="no"
                   keyboardType={showPassword ? 'visible-password' : 'default'}
                 />
                 <TouchableOpacity
