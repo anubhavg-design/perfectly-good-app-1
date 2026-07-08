@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, Linking, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, Pencil, Plus, Copy, Trash2, MapPin, Phone, Mail, Store, ExternalLink, Sparkles } from 'lucide-react-native';
+import { ChevronLeft, Pencil, Plus, Copy, Trash2, MapPin, Phone, Mail, Store, ExternalLink, FileSpreadsheet } from 'lucide-react-native';
 import { opsApi } from '../../../src/api/opsApi';
 import { C, SP, R, money, fmtDate, fmtDateTime, titleCase, hasPerm } from '../../../src/ops/theme';
 import { Card, Btn, Badge, Spinner, Sheet, ConfirmDialog, Toggle, DataTable, EmptyState } from '../../../src/ops/ui';
@@ -132,7 +132,7 @@ export default function VendorProfile() {
         <Text style={styles.sectionTitle}>Menu Items ({v.menu_items?.length || 0})</Text>
         {canMenu && (
           <View style={{ flexDirection: 'row', gap: SP.sm }}>
-            <Btn title="Import" icon={Sparkles} variant="secondary" small onPress={() => setImportOpen(true)} />
+            <Btn title="Import Excel" icon={FileSpreadsheet} variant="secondary" small onPress={() => setImportOpen(true)} />
             <Btn title="Add Item" icon={Plus} small onPress={() => setItemForm({})} />
           </View>
         )}

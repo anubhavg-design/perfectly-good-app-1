@@ -1,0 +1,46 @@
+{
+  "summary": "End-to-end verification of the Jan-2026 Ops+Vendor menu refactor. 14/14 backend tests PASS via pytest (test_menu_import_and_toggle.py). AI menu import removed (POST /api/ops/menu-import/extract => 404), Excel/CSV parse-file correctly maps veg/non_veg + contains_egg (Veg/No, Non-Veg/No, Veg/Yes, non veg/no all classified correctly, prices coerced to numbers), parse-file gated by manage_menu (customer => 403). Vendor toggle in_stock hides item from customer restaurant view (dv_namma menu_items count drops by 1 and restores on toggle back). Vendor surplus with <30% discount is rejected 400. Ops can set discounted_price via PUT /api/ops/menu/{id} (full body — same shape MenuItemForm sends). Admin has all 5 view perms + manage_roles (Team Members section visible). Operations does NOT have manage_roles (POST /api/ops/staff => 403, Add Member button hidden in Settings). All 5 seeded staff logins succeed with role=operations for the 4 ops accounts. Frontend visual verification (desktop 1440x900): Admin Ops sidebar shows all 7 sections (Dashboard, Analytics, Vendors, Orders, Users, Payouts, Settings). Operations sidebar shows only 5 (Dashboard, Analytics, Vendors, Orders, Settings) — Users + Payouts hidden by perm filter (as designed; view_users and view_finance not granted to operations). Vendor page /ops/vendor/dv_namma shows 'Import Excel' button which opens 'Import Menu (Excel / CSV)' modal with columns Item, Description (optional), Original Price, Veg/Non-Veg, Contains Egg, ONE upload button 'Upload CSV / Excel' — NO AI/photo/PDF option. Mobile viewport (390x844): vendor login goes via /home; navigating to Dashboard tab shows all 5 vendor tabs (tab-menu, tab-drops, tab-orders, tab-earnings, tab-settings), Menu tab lists 5 items with toggle-stock switches and 'In stock (visible to customers)' label, NO edit/delete buttons on vendor menu items.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/ops/menu/{id}", "issue": "Body is a full Pydantic model requiring name+original_price — cannot PATCH just discounted_price. Frontend workaround works because MenuItemForm always sends the full body, but a purpose-built partial PATCH (or Optional[str] name) would be cleaner."},
+      {"endpoint": "POST /api/ops/menu-import/parse-file and /ops/vendors/{id}/menu/bulk", "issue": "Guard uses only require_permission('manage_menu'). The 'vendor' role also has manage_menu, so a vendor token could theoretically call these Ops-only endpoints. Not exploitable via the mobile UI, but consider adding a STAFF_ROLES role gate on all /api/ops/* endpoints defense-in-depth."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Vendor login routing", "issue": "vendor@demo.com lands on /home (customer home) after login and must click the Dashboard bottom tab to reach the vendor dashboard. Users may expect a direct redirect to /dashboard for role=vendor.", "affected_testIDs": ["auth-submit-btn", "tab-menu"]}
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_menu_import_and_toggle.py",
+    "/app/test_reports/pytest/pytest_iter11.xml"
+  ],
+  "action_items": [
+    "(Nit) Consider redirecting vendor role to /dashboard after login instead of /home for a cleaner vendor entry.",
+    "(Nit) Add STAFF_ROLES gate to /api/ops/menu-import/parse-file and /api/ops/vendors/{id}/menu/bulk so the vendor role (which owns 'manage_menu') cannot invoke Ops-only bulk import endpoints.",
+    "(Nit) Remove the dead export opsApi.extractMenu in /app/frontend/src/api/opsApi.ts — endpoint no longer exists and export can mislead future maintainers.",
+    "(Optional) Enhance PUT /api/ops/menu/{id} to accept partial updates so 'set discounted price only' becomes a simple PATCH instead of a full-form save."
+  ],
+  "critical_code_review_comments": [
+    "server.py:129-149 ROLE_PERMISSIONS assigns 'manage_menu' to the vendor role, but /api/ops/* endpoints only gate by permission. This is a latent authorization gap even if the current mobile app never hits Ops endpoints as a vendor.",
+    "opsApi.ts:90 defines extractMenu pointing at /ops/menu-import/extract even though the backend endpoint is removed — no caller left; safe to delete.",
+    "dashboard.tsx vendor menu list correctly renders read-only rows with only the in-stock Switch (no edit/delete), matching the requirement.",
+    "app/ops/_layout.tsx: sidebar entries are filtered by hasPerm; admin sees 7 items, operations sees 5 (missing Users/Payouts because operations lacks view_users/view_finance). If the requirement wants operations to also SEE Users/Payouts read-only, those two perms must be added to the operations role."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_menu_import_and_toggle.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 pytest)",
+    "frontend": "100% of items verifiable on web preview (Admin sidebar 7/7, Ops sidebar filtered as expected, Import modal shape correct + no AI option, vendor menu toggles + read-only rows + 5 tabs)"
+  },
+  "seed_data_creation": "Test created + auto-deleted a TEST_Regression_Item_* on dv_namma (cleanup verified).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend URL from frontend/.env EXPO_PUBLIC_BACKEND_URL. Backend regression file: /app/backend/tests/test_menu_import_and_toggle.py — reuse for future menu/RBAC changes. Ops role sidebar intentionally hides Users + Payouts (perms view_users/view_finance not granted). Vendor role has manage_menu permission (design), but the mobile app never touches /ops/* — flagged only as defense-in-depth. Admin login = anubhavg@perfectlygood.in/Anubhavv. Operations = chaitanya@perfectlygood.in/123456789 (and 3 more, all pwd 123456789). Vendor mobile = vendor@demo.com/vendor123 (lands on /home, click Dashboard tab). Menu-item testIDs: vendor-menu-{id}, toggle-stock-{id}. Tab testIDs: tab-menu, tab-drops, tab-orders, tab-earnings, tab-settings. Import modal opens via 'Import Excel' button on /ops/vendor/{id}, modal title 'Import Menu (Excel / CSV)' and only 'Upload CSV / Excel' button (NO AI option).",
+  "rca_of_issue": "N/A — this iteration confirmed the refactor works. Two minor design gaps documented in backend_issues.minor and action_items."
+}

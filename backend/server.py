@@ -598,8 +598,9 @@ async def get_restaurant(vendor_id: str):
     if not v or v.get("status") == "inactive":
         raise HTTPException(status_code=404, detail="Restaurant not found")
     items = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(1000)
-    surplus_items = [_menu_public(m, "surplus") for m in items if m.get("available_today")]
-    menu_items = [_menu_public(m, "takeaway") for m in items]
+    in_stock = lambda m: m.get("in_stock", True) is not False
+    surplus_items = [_menu_public(m, "surplus") for m in items if m.get("available_today") and in_stock(m)]
+    menu_items = [_menu_public(m, "takeaway") for m in items if in_stock(m)]
     return {
         "vendor": _vendor_public(v),
         "surplus_items": surplus_items,
@@ -996,6 +997,28 @@ async def toggle_vendor_drop(item_id: str, body: ToggleDropBody, request: Reques
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"message": "Updated", "is_active": body.is_active}
+
+
+class ToggleStockBody(BaseModel):
+    in_stock: bool
+
+
+@api.put("/vendor/menu/{item_id}/toggle")
+async def toggle_menu_stock(item_id: str, body: ToggleStockBody, request: Request):
+    """Vendor toggles a regular menu item in/out of stock (customer visibility)."""
+    user = await get_current_user(request)
+    if user["role"] not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    result = await db.menu_items.update_one(
+        {"menu_item_id": item_id, "vendor_id": vendor["vendor_id"]},
+        {"$set": {"in_stock": body.in_stock, "updated_at": datetime.now(timezone.utc)}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"message": "Updated", "in_stock": body.in_stock}
 
 @api.get("/vendor/orders")
 async def vendor_orders(request: Request):
@@ -1662,7 +1685,7 @@ async def ops_add_menu_item(vendor_id: str, body: OpsMenuItemBody, request: Requ
         "discounted_price": dp, "category": body.category or vendor.get("category", ""),
         "serving_size": body.serving_size or "", "food_type": body.food_type or "veg",
         "contains_egg": bool(body.contains_egg), "available_today": bool(body.available_today),
-        "quantity_available": body.quantity_available,
+        "in_stock": True, "quantity_available": body.quantity_available,
         "image_url": body.image_url or "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600",
         "created_at": now, "updated_at": now,
     }
@@ -2077,64 +2100,36 @@ def _parse_json_items(text: str) -> list:
 def _normalize_menu_row(d: dict) -> dict:
     dd = {(str(k).strip().lower() if k else ""): v for k, v in d.items()}
     g = lambda *keys: next((dd[k] for k in keys if k in dd and dd[k] not in (None, "")), None)
-    truthy = lambda v: str(v).strip().lower() in ("yes", "true", "1", "y", "available", "live", "veg")
-    veg = g("veg", "veg/non veg", "veg / non veg", "food type", "type")
-    veg_is = True if veg is None else str(veg).strip().lower() in ("veg", "yes", "true", "1", "vegetarian", "y")
+
+    def find(*subs):
+        # Match the first non-empty column whose header contains any of the substrings
+        for k, v in dd.items():
+            if v in (None, ""):
+                continue
+            if any(s in k for s in subs):
+                return v
+        return None
+
+    truthy = lambda v: str(v).strip().lower() in ("yes", "true", "1", "y", "available", "live")
+
+    veg_val = find("veg", "food type", "food_type")  # 'veg', 'veg/non-veg', 'non veg', etc.
+    if veg_val is None:
+        veg_is = True
+    else:
+        vv = str(veg_val).strip().lower()
+        veg_is = not ("non" in vv or vv in ("no", "n", "false", "0", "nonveg", "non-veg", "non_veg"))
+
     return {
-        "name": str(g("item name", "name", "item") or "").strip(),
+        "name": str(g("item name", "name", "item") or find("item", "dish", "name") or "").strip(),
         "description": str(g("description", "desc") or ""),
-        "original_price": _coerce_price(g("original price", "price", "mrp")) or 0,
+        "original_price": _coerce_price(g("original price", "price", "mrp") or find("price")) or 0,
         "discounted_price": _coerce_price(g("discounted price", "discount price", "sale price")),
         "serving_size": str(g("serving size", "serving") or ""),
         "category": str(g("category") or ""),
         "food_type": "veg" if veg_is else "non_veg",
-        "contains_egg": truthy(g("contains egg", "egg") or ""),
-        "available_today": truthy(g("available today", "available", "live") or ""),
+        "contains_egg": truthy(find("egg") or ""),
+        "available_today": truthy(find("available today", "available", "live") or ""),
     }
-
-
-@api.post("/ops/menu-import/extract")
-async def menu_import_extract(file: UploadFile = File(...), request: Request = None):
-    if request:
-        await require_permission(request, "ai_import")
-    import base64 as b64
-    content = await file.read()
-    fname = (file.filename or "").lower()
-    images_b64 = []
-    if fname.endswith(".pdf") or (file.content_type or "") == "application/pdf":
-        import fitz
-        doc = fitz.open(stream=content, filetype="pdf")
-        for page in doc:
-            pix = page.get_pixmap(dpi=140)
-            images_b64.append(b64.b64encode(pix.tobytes("png")).decode())
-        doc.close()
-    else:
-        images_b64.append(b64.b64encode(content).decode())
-    images_b64 = images_b64[:8]
-    if not images_b64:
-        raise HTTPException(status_code=400, detail="No readable pages found")
-
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
-        chat = LlmChat(
-            api_key=os.environ.get("EMERGENT_LLM_KEY"),
-            session_id=f"menu-{secrets.token_hex(4)}",
-            system_message="You extract structured menu items from restaurant menu images. Respond with ONLY a JSON array, no prose, no markdown.",
-        ).with_model("openai", "gpt-4o")
-        prompt = (
-            "Extract EVERY menu item visible in the attached menu image(s). "
-            "Return a strict JSON array; each element must be "
-            '{"name": string, "description": string, "original_price": number}. '
-            "Use an empty string when a description is absent. original_price is a number with no currency symbol. "
-            "Skip section headers, addresses, phone numbers and any non-item text. Return ONLY the JSON array."
-        )
-        msg = UserMessage(text=prompt, file_contents=[ImageContent(image_base64=b) for b in images_b64])
-        resp = await chat.send_message(msg)
-        items = _parse_json_items(resp if isinstance(resp, str) else getattr(resp, "text", str(resp)))
-    except Exception as e:
-        logger.exception("AI menu extract failed")
-        raise HTTPException(status_code=502, detail=f"AI extraction failed: {e}")
-    return {"items": items, "count": len(items), "pages": len(images_b64)}
 
 
 @api.post("/ops/menu-import/parse-file")
@@ -2180,15 +2175,13 @@ async def ops_bulk_add_menu(vendor_id: str, body: dict, request: Request):
             continue
         dp = it.get("discounted_price")
         dp = _coerce_price(dp) if dp not in (None, "") else None
-        if dp is None:
-            dp = round(op * (1 - cfg["default_discount_pct"] / 100), 2)
         docs.append({
             "menu_item_id": gen_id("menu"), "vendor_id": vendor_id, "name": name,
             "description": str(it.get("description") or ""), "original_price": op,
             "discounted_price": dp, "category": str(it.get("category") or vendor.get("category", "")),
             "serving_size": str(it.get("serving_size") or ""), "food_type": it.get("food_type") or "veg",
-            "contains_egg": bool(it.get("contains_egg")), "available_today": bool(it.get("available_today")),
-            "quantity_available": None,
+            "contains_egg": bool(it.get("contains_egg")), "available_today": False,
+            "in_stock": True, "quantity_available": None,
             "image_url": it.get("image_url") or "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600",
             "created_at": now, "updated_at": now,
         })

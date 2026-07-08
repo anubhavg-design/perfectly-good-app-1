@@ -5,12 +5,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone } from 'lucide-react-native';
+import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import { vendorApi } from '../../src/api/client';
 
-type TabType = 'drops' | 'orders' | 'earnings' | 'settings';
+type TabType = 'menu' | 'drops' | 'orders' | 'earnings' | 'settings';
 
 interface VendorDrop {
   item_id: string;
@@ -55,8 +55,9 @@ interface EarningsOrder {
 export default function DashboardScreen() {
   const { user } = useAuth();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<TabType>('drops');
+  const [activeTab, setActiveTab] = useState<TabType>('menu');
   const [drops, setDrops] = useState<VendorDrop[]>([]);
+  const [menu, setMenu] = useState<any[]>([]);
   const [orders, setOrders] = useState<VendorOrder[]>([]);
   const [earningsSummary, setEarningsSummary] = useState<EarningsSummary | null>(null);
   const [earningsOrders, setEarningsOrders] = useState<EarningsOrder[]>([]);
@@ -70,7 +71,10 @@ export default function DashboardScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      if (activeTab === 'drops') {
+      if (activeTab === 'menu') {
+        const data = await vendorApi.menu();
+        setMenu(data || []);
+      } else if (activeTab === 'drops') {
         const data = await vendorApi.drops();
         setDrops(data || []);
       } else if (activeTab === 'orders') {
@@ -125,6 +129,43 @@ export default function DashboardScreen() {
     } catch (err: any) {
       Alert.alert('Error', err.message);
     }
+  };
+
+  const toggleStock = async (id: string, inStock: boolean) => {
+    try {
+      await vendorApi.toggleMenuItem(id, !inStock);
+      setMenu(prev => prev.map(m => m.menu_item_id === id ? { ...m, in_stock: !inStock } : m));
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
+    }
+  };
+
+  const renderMenuItem = ({ item }: { item: any }) => {
+    const inStock = item.in_stock !== false;
+    const isVeg = item.food_type !== 'non_veg';
+    return (
+      <View testID={`vendor-menu-${item.menu_item_id}`} style={styles.card}>
+        <View style={styles.cardRow}>
+          <View style={styles.cardInfo}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={{ width: 12, height: 12, borderRadius: 2, borderWidth: 1.5, borderColor: isVeg ? COLORS.success : COLORS.error, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isVeg ? COLORS.success : COLORS.error }} />
+              </View>
+              <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
+            </View>
+            <Text style={styles.cardSub}>₹{item.original_price}{item.available_today ? '  ·  Surplus live' : ''}</Text>
+            <Text style={[styles.cardSub, { color: inStock ? COLORS.success : COLORS.textMuted }]}>{inStock ? 'In stock (visible to customers)' : 'Out of stock (hidden)'}</Text>
+          </View>
+          <Switch
+            testID={`toggle-stock-${item.menu_item_id}`}
+            value={inStock}
+            onValueChange={() => toggleStock(item.menu_item_id, inStock)}
+            trackColor={{ false: COLORS.border, true: COLORS.primary + '60' }}
+            thumbColor={inStock ? COLORS.primary : COLORS.textMuted}
+          />
+        </View>
+      </View>
+    );
   };
 
   const renderDrop = ({ item }: { item: VendorDrop }) => (
@@ -250,7 +291,7 @@ export default function DashboardScreen() {
             onPress={() => router.push('/vendor-create-drop')}
           >
             <Plus size={20} color="#fff" />
-            <Text style={styles.addBtnText}>New Drop</Text>
+            <Text style={styles.addBtnText}>Add Surplus</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -258,12 +299,20 @@ export default function DashboardScreen() {
       {/* Tabs */}
       <View style={styles.tabRow}>
         <TouchableOpacity
+          testID="tab-menu"
+          style={[styles.tab, activeTab === 'menu' && styles.tabActive]}
+          onPress={() => setActiveTab('menu')}
+        >
+          <List size={14} color={activeTab === 'menu' ? COLORS.primary : COLORS.textMuted} />
+          <Text style={[styles.tabText, activeTab === 'menu' && styles.tabTextActive]}>Menu</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           testID="tab-drops"
           style={[styles.tab, activeTab === 'drops' && styles.tabActive]}
           onPress={() => setActiveTab('drops')}
         >
           <Package size={14} color={activeTab === 'drops' ? COLORS.primary : COLORS.textMuted} />
-          <Text style={[styles.tabText, activeTab === 'drops' && styles.tabTextActive]}>Drops</Text>
+          <Text style={[styles.tabText, activeTab === 'drops' && styles.tabTextActive]}>Surplus</Text>
         </TouchableOpacity>
         <TouchableOpacity
           testID="tab-orders"
@@ -385,17 +434,19 @@ export default function DashboardScreen() {
       ) : (
         <FlatList
           testID={`vendor-${activeTab}-list`}
-          data={activeTab === 'drops' ? drops : orders}
-          renderItem={activeTab === 'drops' ? renderDrop : renderOrder}
-          keyExtractor={(item: any) => item.item_id || item.order_id}
+          data={activeTab === 'menu' ? menu : activeTab === 'drops' ? drops.filter((d: any) => d.is_active) : orders}
+          renderItem={activeTab === 'menu' ? renderMenuItem : activeTab === 'drops' ? renderDrop : renderOrder}
+          keyExtractor={(item: any) => item.menu_item_id || item.item_id || item.order_id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No {activeTab} found</Text>
+              <Text style={styles.emptyTitle}>
+                {activeTab === 'menu' ? 'No menu items yet' : activeTab === 'drops' ? 'No surplus drops' : 'No orders found'}
+              </Text>
               <Text style={styles.emptySubtitle}>
-                {activeTab === 'drops' ? 'Create a new drop to get started!' : 'Orders will appear here.'}
+                {activeTab === 'menu' ? 'Your menu is added by the Perfectly Good team.' : activeTab === 'drops' ? 'Tap "Add Surplus" to list a surplus deal!' : 'Orders will appear here.'}
               </Text>
             </View>
           }
