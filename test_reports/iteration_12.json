@@ -1,0 +1,31 @@
+{
+  "summary": "Verified idempotent startup seed_data() for 5 staff accounts on fresh preview DB. All 5 seeded accounts authenticate successfully via POST /api/auth/login (admin returns role=admin with full permissions incl. manage_roles; other 4 return role=operations). Wrong password '123456' for kavyashetty975@gmail.com correctly returns 401 (confirms canonical ops pw is '123456789'). Admin UI login routes to /ops and shows all 7 sidebar items; Operations login routes to /ops and shows the limited 5-item sidebar (no Users, no Payouts). Operations POST /api/ops/staff returns 403 (Insufficient permissions requires 'manage_roles'). GET /api/ops/staff as admin returns each seeded email exactly once (no duplicates → idempotency holds). Backend service healthy after startup. 9/9 backend tests pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_seed_accounts.py",
+    "/app/test_reports/pytest/pytest_seed_accounts.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "seed_data() in backend/server.py (line 2385) is properly idempotent — each account is only inserted when db.users.find_one({email}) returns None, so existing accounts and admin-changed passwords are preserved.",
+    "POST /api/auth/login returns access_token (not token). Frontend/mobile clients must use the 'access_token' key. Not a bug but worth noting for any external tooling."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_seed_accounts.py (new — 9 tests covering all 5 seeded accounts, /me permissions, wrong password 401, ops 403 on staff creation, no-duplicate idempotency)"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (admin & ops login + sidebar visibility verified)"},
+  "seed_data_creation": "No new seed data created — verified existing startup seeding.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login endpoint returns 'access_token' key (not 'token'). get_current_user() reads cookies BEFORE Authorization header, so tests that call multiple logins in the same requests.Session need to call session.cookies.clear() between logins to avoid the last-set cookie overriding the intended Bearer token. Sidebar admin=7 items, operations=5 items (no Users, no Payouts). Login submit button text is 'Log In' (with space); the 'Log In' tab has the same text so use .last selector in Playwright.",
+  "rca_of_issue": "Original user report: production login failing with 401. RCA: fresh Atlas DB had no user rows (staff previously only created via manual sandbox scripts). Fix (this iteration): FastAPI @app.on_event('startup') now calls seed_data() which idempotently inserts the 5 staff accounts if missing. Verified: all 5 accounts now authenticate on preview stack; user's original 401 was likely caused by typing '123456' instead of canonical operations password '123456789' — reproduced and confirmed to return 401."
+}

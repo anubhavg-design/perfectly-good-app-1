@@ -2383,35 +2383,29 @@ async def root():
 
 # ── Seed Data ───────────────────────────────────────────────────────────
 async def seed_data():
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@perfectlygood.com")
-    admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
     vendor_email = os.environ.get("VENDOR_EMAIL", "vendor@demo.com")
     vendor_password = os.environ.get("VENDOR_PASSWORD", "vendor123")
 
-    # Seed admin
-    existing_admin = await db.users.find_one({"email": admin_email})
-    if not existing_admin:
-        admin_id = gen_id("user")
-        await db.users.insert_one({
-            "user_id": admin_id,
-            "email": admin_email,
-            "name": "Admin",
-            "password_hash": hash_password(admin_password),
-            "role": "admin",
-            "picture": None,
-            "location": None,
-            "created_at": datetime.now(timezone.utc),
-        })
-        logger.info(f"Admin seeded: {admin_email}")
-    else:
-        updates = {}
-        if existing_admin.get("role") != "admin":
-            updates["role"] = "admin"
-        if not verify_password(admin_password, existing_admin.get("password_hash", "")):
-            updates["password_hash"] = hash_password(admin_password)
-        if updates:
-            await db.users.update_one({"email": admin_email}, {"$set": updates})
-            logger.info(f"Admin updated: {admin_email}")
+    # ── Seed core staff accounts (idempotent). Runs on every startup so a fresh
+    #    production Atlas DB gets the team accounts; existing accounts are left
+    #    untouched (admin-changed passwords survive). ──
+    staff_seed = [
+        ("Anubhav", "anubhavg@perfectlygood.in", "Anubhavv", "admin"),
+        ("Chaitanya", "chaitanya@perfectlygood.in", "123456789", "operations"),
+        ("Kavya Shetty", "kavyashetty975@gmail.com", "123456789", "operations"),
+        ("Sandhya", "sas023261@gmail.com", "123456789", "operations"),
+        ("Subhash Ramachandra", "subhashramachandraofficial@gmail.com", "123456789", "operations"),
+    ]
+    for name, email, pwd, role in staff_seed:
+        email = email.strip().lower()
+        if not await db.users.find_one({"email": email}):
+            await db.users.insert_one({
+                "user_id": gen_id("user"), "email": email, "name": name,
+                "password_hash": hash_password(pwd), "role": role,
+                "permission_overrides": {}, "phone": "", "picture": None,
+                "location": None, "created_at": datetime.now(timezone.utc),
+            })
+            logger.info(f"Staff seeded: {email} ({role})")
 
     # Seed vendor user + vendor profile
     existing_vendor = await db.users.find_one({"email": vendor_email})
