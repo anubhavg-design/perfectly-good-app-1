@@ -176,7 +176,7 @@ DEFAULT_SETTINGS = {
     "gst_rate": 0.05,
     "convenience_rate": 0.05,
     "default_discount_pct": 40,
-    "categories": ["Bakery", "Restaurant", "Cafe", "Grocery", "Sweets", "Cloud Kitchen", "Dessert"],
+    "categories": ["Bakery", "Restaurant", "Cafe", "Grocery", "QSR", "Cloud Kitchen", "Dessert"],
     "pickup_slots": ["12:00-15:00", "15:00-18:00", "17:00-20:00", "18:00-21:00", "19:00-22:00"],
     "service_types": ["takeaway", "dine_in", "both"],
 }
