@@ -164,7 +164,7 @@ function SearchGroup({ title, items, onPick }: any) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, flexDirection: 'row', backgroundColor: C.bg },
-  sidebar: { width: 244, backgroundColor: C.sidebar, paddingTop: SP.xl },
+  sidebar: { width: 244, backgroundColor: C.sidebar, paddingTop: SP.xl, flex: 1 },
   brand: { paddingHorizontal: SP.lg, paddingBottom: SP.lg, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
   brandText: { color: '#fff', fontSize: 18, fontWeight: '800' },
   brandSub: { color: C.primary, fontSize: 12, fontWeight: '700', marginTop: 2, letterSpacing: 0.5 },
