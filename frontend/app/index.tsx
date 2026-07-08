@@ -63,18 +63,20 @@ export default function AuthScreen() {
       return;
     }
     // Password strength
-    if (!isLogin && password.length < 6) {
+    if (!isLogin && password.trim().length < 6) {
       setError('Password must be at least 6 characters');
       return;
     }
     setSubmitting(true);
     try {
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanPassword = password.trim();
       if (isLogin) {
-        const u = await login(email.trim(), password);
+        const u = await login(cleanEmail, cleanPassword);
         const staff = ['admin', 'operations', 'customer_success', 'finance'];
         router.replace(u && staff.includes((u as any).role) ? '/ops' : '/(tabs)/home');
       } else {
-        await register(name.trim(), email.trim(), phone.trim(), password);
+        await register(name.trim(), cleanEmail, phone.trim(), cleanPassword);
         router.replace('/(tabs)/home');
       }
     } catch (err: any) {
@@ -192,6 +194,12 @@ export default function AuthScreen() {
                   placeholder="••••••••"
                   placeholderTextColor={COLORS.textMuted}
                   secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  spellCheck={false}
+                  textContentType="password"
+                  autoComplete={isLogin ? 'current-password' : 'new-password'}
+                  keyboardType={showPassword ? 'visible-password' : 'default'}
                 />
                 <TouchableOpacity
                   testID="toggle-password"

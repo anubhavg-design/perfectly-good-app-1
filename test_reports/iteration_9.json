@@ -1,0 +1,27 @@
+{
+  "summary": "Verified the mobile login whitespace bug fix and regression of the Ops layout safe-area changes on the web preview (mobile viewport 390x844). PRIMARY: staff login with a trailing-space password ('123456 ') successfully authenticates and routes to /ops — confirming the client-side password.trim() + email.trim().toLowerCase() fix is in effect. Staff login also works with clean creds and with an email that has leading/trailing spaces + uppercase. Regression: Ops dashboard renders after useSafeAreaInsets changes, hamburger opens the drawer on narrow width, drawer nav routes to Analytics, Vendors, Settings, Orders, Dashboard successfully; drawer closes via backdrop. Users/Payouts nav entries correctly hidden for 'operations' role (RBAC filter — not a bug; requires admin to view). Safe-area top/bottom padding cannot be visually validated on web (insets are 0) — per review request, this is expected and only manifests on real devices/Expo Go.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "None from testing agent — bug fix verified. Note: verify the top/bottom safe-area breathing-room fix visually on a real iPhone/Android device or Expo Go (web insets are 0 so the padding change is not visible in this preview).",
+    "Consider adding testID on the Ops top-bar hamburger button (svg has no class on web — currently tested via first SVG at top-left) and on the sidebar Logout button. Nice-to-have for future automated tests; not blocking."
+  ],
+  "critical_code_review_comments": [
+    "index.tsx handleSubmit correctly does email.trim().toLowerCase() and password.trim() before calling login(). Password TextInput has autoCapitalize=none, autoCorrect=false, spellCheck=false, and keyboardType toggles to 'visible-password' when the eye icon is toggled — matches the described Android autofill mitigation.",
+    "ops/_layout.tsx uses useSafeAreaInsets: TopBar applies paddingTop: insets.top (height 60 + insets.top); Sidebar applies paddingTop when narrow (drawer); content ScrollView applies paddingBottom: SP.xl + insets.bottom — matches the requested top+bottom breathing room fix.",
+    "NAV.filter with hasPerm hides Users (view_users) and Payouts (view_finance) for the 'operations' role account (kavyashetty975@gmail.com) — the review-request nav list assumed all 7 items would show; only 5 do for this role. Expected behavior."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only per request)", "frontend": "100% for primary bug fix (trailing-space login) and staff/customer routing; drawer/nav verified for role-visible items"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login field testIDs: email-input, password-input, login-tab, register-tab, auth-submit-btn, toggle-password. On mobile viewport (<900px width) the Ops layout renders a drawer instead of the persistent sidebar; the hamburger icon is a lucide-react-native SVG rendered without a CSS class on web — locate it by finding the first SVG whose bounding-rect top<100 and left<100 in the topbar. Drawer nav items are Pressables (role='button') containing an icon + Text label; select by label text but ALWAYS open the drawer first to disambiguate from any 'Orders'/'Vendors' text that may appear in the page content (e.g., 'Orders Today' KPI on the Dashboard). Users/Payouts nav entries are gated by RBAC and only visible for admin role — use anubhavg@perfectlygood.in to test those. AsyncStorage on web = localStorage; auth token persists across page reloads so use the in-app Logout icon (LogOut lucide svg at bottom of drawer) to switch users.",
+  "rca_of_issue": "Android soft-keyboard/autofill was inserting a trailing space into the password field, so the client submitted '123456 ' (7 chars). Backend correctly rejects the mismatch (verified pw '123456' -> 200, '123456 ' -> 401). Fix implemented at the client boundary in /app/frontend/app/index.tsx handleSubmit: const cleanPassword = password.trim(); combined with input hardening (autoCapitalize=none, autoCorrect=false, spellCheck=false, textContentType=password, keyboardType=visible-password when unmasked). Reproduction on web preview: typed '123456 ' into password-input for kavyashetty975@gmail.com — DOM value confirmed as '123456 ' — submitted, backend accepted, client navigated to /ops. Fix confirmed working."
+}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView, useWindowDimensions, TextInput } from 'react-native';
 import { Slot, usePathname, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   LayoutDashboard, Store, ShoppingBag, Users, Wallet, Settings as SettingsIcon,
   Menu as MenuIcon, X, Search, LogOut, BarChart3,
@@ -29,6 +30,7 @@ export default function OpsLayout() {
   const { width } = useWindowDimensions();
   const isNarrow = width < 900;
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!loading && (!user || !STAFF.includes((user as any).role))) {
@@ -48,7 +50,7 @@ export default function OpsLayout() {
   const navItems = NAV.filter((n) => hasPerm(user, n.perm));
 
   const Sidebar = (
-    <View style={styles.sidebar}>
+    <View style={[styles.sidebar, { paddingTop: SP.xl + (isNarrow ? insets.top : 0) }]}>
       <View style={styles.brand}>
         <Text style={styles.brandText}>Perfectly Good</Text>
         <Text style={styles.brandSub}>Operations</Text>
@@ -82,8 +84,8 @@ export default function OpsLayout() {
     <View style={styles.root}>
       {!isNarrow && Sidebar}
       <View style={{ flex: 1 }}>
-        <TopBar isNarrow={isNarrow} onMenu={() => setDrawerOpen(true)} />
-        <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={styles.content}>
+        <TopBar isNarrow={isNarrow} topInset={insets.top} onMenu={() => setDrawerOpen(true)} />
+        <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={[styles.content, { paddingBottom: SP.xl + insets.bottom }]}>
           <Slot />
         </ScrollView>
       </View>
@@ -97,7 +99,7 @@ export default function OpsLayout() {
   );
 }
 
-function TopBar({ isNarrow, onMenu }: { isNarrow: boolean; onMenu: () => void }) {
+function TopBar({ isNarrow, topInset, onMenu }: { isNarrow: boolean; topInset: number; onMenu: () => void }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<any>(null);
   const router = useRouter();
@@ -111,7 +113,7 @@ function TopBar({ isNarrow, onMenu }: { isNarrow: boolean; onMenu: () => void })
   const go = (path: string) => { setQ(''); setResults(null); router.push(path as any); };
 
   return (
-    <View style={styles.topbar}>
+    <View style={[styles.topbar, { paddingTop: topInset, height: 60 + topInset }]}>
       {isNarrow && (
         <Pressable onPress={onMenu} hitSlop={8} style={{ marginRight: SP.md }}>
           <MenuIcon size={22} color={C.text} />
