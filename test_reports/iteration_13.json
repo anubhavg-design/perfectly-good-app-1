@@ -1,0 +1,35 @@
+{
+  "summary": "Verified the Jan-2026 Ops Excel/CSV menu-import fix on WEB end-to-end (native fix cannot be validated here, no device/Expo Go available). Backend: 21/21 pytest tests pass across 2 files (14 in test_menu_import_and_toggle.py + 7 new in test_ops_menu_import_e2e.py). POST /api/ops/menu-import/parse-file correctly parses CSV & XLSX (veg/non_veg + contains_egg), requires manage_menu (customer=>403, no token=>401), rejects unsupported extensions with 400. POST /api/ops/vendors/{id}/menu/bulk persists parsed items and filters invalid rows (empty name / non-positive price). Ops role has manage_menu (parse-file returns 200 for chaitanya@perfectlygood.in). Frontend WEB: Admin & Operations logins route to /ops. Admin sidebar shows all 7 items (Dashboard, Analytics, Vendors, Orders, Users, Payouts, Settings); Operations sees 5 items (no Users/Payouts). On /ops/vendor/dv_namma, 'Import Excel' button opens the modal titled 'Import Menu (Excel / CSV)' with a single 'Upload CSV / Excel' action (no AI option). Uploading a real CSV via the file picker parsed all 3 rows with correct food_type (Veg/Non-Veg toggle) and contains_egg (Egg toggle), and 'Save 3 Items' successfully bulk-added them (Menu Items count 4 -> 7). Ops sidebar/user box render correctly after _layout.tsx safe-area padding changes (no clipping at bottom, brand at top). Test data cleaned up.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_menu_import_and_toggle.py",
+    "/app/backend/tests/test_ops_menu_import_e2e.py",
+    "/app/test_reports/pytest/pytest_iter13.xml",
+    "/app/test_reports/pytest/pytest_iter13_e2e.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "opsApi.ts postFile() correctly branches on Platform.OS: on 'web' it fetches the uri to a Blob (works with expo-document-picker's blob:/data: URIs); on native it appends {uri,name,type} FormData descriptor. Mime type is inferred from the extension for .csv/.xlsx/.xls with a sensible octet-stream fallback. Auth header is passed only if a token exists. This matches the React Native FormData contract and should resolve the native 'Network request failed' bug.",
+    "ImportMenu.tsx correctly requests only CSV/XLSX mime types via DocumentPicker.getDocumentAsync and shows a single 'Upload CSV / Excel' button — no AI option in the UI, consistent with the removal of AI menu import. Save handler filters rows lacking name or with price<=0 before POSTing to /ops/vendors/{id}/menu/bulk.",
+    "ops/_layout.tsx safe-area padding: sidebar paddingTop adds insets.top only when isNarrow (mobile/tablet), userBox adds insets.bottom, TopBar adds topInset. Verified on desktop (1440x900) that nothing is clipped and the user box (name + role) is visible at the bottom of the sidebar.",
+    "Non-blocking: ImportMenu.tsx and ui.tsx contain no testID props. Not required for this fix — flows were testable via visible text — but adding testIDs (e.g. importmenu-upload-btn, importmenu-save-btn, importmenu-row-name-{i}) would make future automated testing more robust."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ops_menu_import_e2e.py (new — 7 tests: CSV round-trip with GET verify, XLSX parse, auth (no token 401/403, ops 200, customer 403), unsupported extension 400, bulk-add invalid-row filtering)"
+  ],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "100% (admin+ops login+route, sidebar admin=7 / ops=5, Import Excel modal shows only CSV/Excel, full CSV upload->parse->save on web verified)"},
+  "seed_data_creation": "Ephemeral: 3 CSV-import items (TEST_UI_Veg Thali, TEST_UI_Chicken Roll, TEST_UI_Egg Roll) added to dv_namma via UI then deleted; a few TEST_Iter13_* items in backend tests added and deleted in-test. Final DB state: dv_namma back to 4 menu items, no TEST_* residue.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "1) Native (Expo Go) verification of the postFile FormData {uri,name,type} branch is STILL PENDING — requires a real device. Web branch confirmed working. 2) Ops user has manage_menu permission (parse-file 200) — so E1 can test the flow with a non-admin ops account as well. 3) Login endpoint returns 'access_token' (not 'token'). 4) get_current_user reads cookie before Authorization header, so tests using a shared requests.Session with multiple logins need session.cookies.clear() between logins. 5) Playwright: on the login screen, both the 'Log In' tab and the submit button match text 'Log In' — use .last for the submit. 6) For fresh ops-login testing in the browser, call page.context.clear_cookies() AND page.evaluate localStorage.clear() before nav — the app persists auth across reloads.",
+  "rca_of_issue": "Original bug: 'Network request failed' when uploading Excel/CSV from a native Expo Go device. RCA: on RN, fetch('file:///...') is not supported by react-native's Blob impl, so the previous postFile helper's `await (await fetch(uri)).blob()` step threw synchronously before the multipart POST left the device. Fix applied by E1: platform-aware postFile — web keeps blob() path; native appends {uri,name,type} descriptor to FormData directly, which is React Native's documented way to attach local files and delegates the multipart body to the platform. Web verified in this iteration (no regression, parse+save round-trip works). Native branch validation deferred to real-device testing."
+}

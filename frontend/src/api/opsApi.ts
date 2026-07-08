@@ -8,9 +8,22 @@ const API = (() => {
 
 async function postFile(path: string, uri: string, name: string) {
   const token = await getToken();
-  const blob = await (await fetch(uri)).blob();
+  const fname = name || 'upload';
+  const lower = fname.toLowerCase();
+  const type = lower.endsWith('.csv') ? 'text/csv'
+    : lower.endsWith('.xlsx') ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    : lower.endsWith('.xls') ? 'application/vnd.ms-excel'
+    : 'application/octet-stream';
   const fd = new FormData();
-  fd.append('file', blob as any, name || 'upload');
+  if (Platform.OS === 'web') {
+    // On web the picker gives a blob:/data: URI we can fetch into a Blob
+    const blob = await (await fetch(uri)).blob();
+    fd.append('file', blob as any, fname);
+  } else {
+    // On native, append the file descriptor directly (fetching file:// into a
+    // blob fails with "Network request failed"). Let fetch build the multipart boundary.
+    fd.append('file', { uri, name: fname, type } as any);
+  }
   const res = await fetch(`${API}${path}`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},

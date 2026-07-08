@@ -68,7 +68,7 @@ export default function OpsLayout() {
           );
         })}
       </ScrollView>
-      <View style={styles.userBox}>
+      <View style={[styles.userBox, { paddingBottom: SP.lg + insets.bottom }]}>
         <View style={{ flex: 1 }}>
           <Text style={styles.userName} numberOfLines={1}>{(user as any).name || (user as any).email}</Text>
           <Text style={styles.userRole}>{titleCase((user as any).role)}</Text>
@@ -92,7 +92,7 @@ export default function OpsLayout() {
       {isNarrow && drawerOpen && (
         <View style={styles.drawerOverlay}>
           <Pressable style={styles.drawerBackdrop} onPress={() => setDrawerOpen(false)} />
-          <View style={{ width: 250 }}>{Sidebar}</View>
+          <View style={{ width: 250, height: '100%' }}>{Sidebar}</View>
         </View>
       )}
     </View>
