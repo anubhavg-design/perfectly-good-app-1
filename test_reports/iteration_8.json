@@ -1,0 +1,39 @@
+{
+  "summary": "Verified the staff password-reset bug fix end-to-end. Backend: 11/11 pytest cases passed in /app/backend/tests/test_staff_password_reset.py — PUT /api/ops/staff/{id}/password as admin (200 + staff can then log in with new password + login returns correct role='operations' and 10 permissions), rejects <6-char & empty passwords (400), returns 404 for unknown user_id, and forbids finance staff with 403 (created finance user via POST /api/ops/staff, logged in as them, attempted reset — confirmed 403 as they lack manage_roles). Also verified POST /api/ops/staff still creates a working operations account whose owner can immediately log in with the provided password. Frontend (Ops Settings @ /ops/settings, admin=anubhavg): Admin & Team Members section renders 8 staff rows each with role dropdown + key-icon (Reset Password) + trash-icon. Clicking the key icon on Chaitanya's row opens the 'Reset Password' sheet showing 'Set a new password for Chaitanya (chaitanya@perfectlygood.in)…' with a 'Min 6 characters' input and Update Password button. Setting password 'UIResetPwd2026!' → success alert 'Password updated for Chaitanya. Share it with them: UIResetPwd2026!' → verified via /api/auth/login that Chaitanya can log in with that exact password (role=operations, 10 perms, access_token present). Add Team Member sheet: 'Password' field is now marked required with placeholder 'Min 6 characters — share with the member'; leaving name/email empty triggers 'Name and email required' alert; code path at settings.tsx:59 additionally enforces password >=6 with an explicit alert ('Please set a password of at least 6 characters…'). No silent auto-generation remains.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_staff_password_reset.py",
+    "/app/test_reports/pytest/pytest_staff_password.xml"
+  ],
+  "action_items": [
+    "(Nice-to-have) Add testID props to the Reset Password key-button, Update Password submit, Add Member button, and password TextInput in /app/frontend/app/ops/settings.tsx to make future Playwright tests more robust (currently we located the button by lucide SVG position which works but is brittle).",
+    "(Nice-to-have) The success alert echoes the plaintext password back to the admin (alert(`Password updated for … Share it with them: ${newPwd}`)). This is intentional so admin can share it, but consider a copy-to-clipboard UX later instead of showing in a JS alert() which some users may screenshot inadvertently."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1989-1999 — endpoint correctly gates on require_permission('manage_roles'), validates password length (>=6), verifies target user exists AND has role in STAFF_ROLES (so admin cannot reset a non-staff/customer user's password via this route — good), and bcrypt-hashes the new password. No mongodb _id leaks.",
+    "server.py:1944-1959 (POST /ops/staff) — still uses `hash_password(body.password or secrets.token_urlsafe(8))` server-side. The empty-password fallback is DEAD code now because the frontend enforces min 6 chars, but the backend still allows an empty password to reach the fallback if a request is made directly to the API. Consider adding the same `if len(password) < 6: 400` guard on POST /ops/staff so the bug cannot recur via API-only clients.",
+    "settings.tsx:59 — validation is client-side only; combined with backend gap above, an API caller could still create a staff with no password. Not blocking for this fix, but should be tightened.",
+    "opsApi.ts:83 — setStaffPassword correctly PUTs {password} body to /ops/staff/{id}/password. Clean."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_staff_password_reset.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11)",
+    "frontend": "100% for tested flows (admin login, ops/settings render, key-icon → Reset Password sheet, password update, chaitanya login with new pwd, Add Member sheet validation)"
+  },
+  "seed_data_creation": "During RBAC tests, created TEST_finance_* and TEST_ops_* staff via POST /api/ops/staff and deleted them at the end of each test. Chaitanya's password is currently set to 'UIResetPwd2026!' (last UI-reset value); main agent may want to restore to a known dev value.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend test file /app/backend/tests/test_staff_password_reset.py covers the full password-reset flow (happy path, validation, 404, 403 RBAC, and create-staff→login). Chaitanya's password was left as 'UIResetPwd2026!' after the UI-flow verification. Ops Settings /ops/settings has NO testIDs on the staff rows / add-member sheet / reset-password sheet — Playwright had to locate elements by text and lucide-SVG index (svgs[svgs.length-2] = key, svgs[last] = trash). Consider adding testIDs for future stability.",
+  "rca_of_issue": "Root cause of the original bug (per problem statement) was: POST /api/ops/staff at server.py:1954 used `hash_password(body.password or secrets.token_urlsafe(8))`, silently substituting a random 8-byte urlsafe string when body.password was empty/None. The 'Add Team Member' form did not require a password input, so admins routinely created staff with no visible password. There was no admin-facing way to (re)set a staff password afterwards. Fix verified: (a) new PUT /api/ops/staff/{id}/password endpoint with manage_roles + min-6 + role-in-STAFF_ROLES check, (b) Settings UI now shows a KeyRound icon per staff row that opens a Reset Password sheet, (c) createStaff() now enforces password >=6 client-side. Residual gap: backend POST /api/ops/staff still accepts empty password (falls back to random). Not exploitable via UI, but worth closing."
+}

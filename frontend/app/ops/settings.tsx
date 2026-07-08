@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable } from 'react-native';
-import { X, Plus, Trash2 } from 'lucide-react-native';
+import { X, Plus, Trash2, KeyRound } from 'lucide-react-native';
 import { opsApi } from '../../src/api/opsApi';
 import { C, SP, R, titleCase, hasPerm, fmtDate } from '../../src/ops/theme';
 import { Card, Btn, Badge, Field, TextField, Dropdown, Spinner, PageHeader, Sheet, ConfirmDialog, EmptyState } from '../../src/ops/ui';
@@ -23,6 +23,9 @@ export default function Settings() {
   const [addStaff, setAddStaff] = useState(false);
   const [sform, setSform] = useState<any>({ name: '', email: '', password: '', role: 'operations' });
   const [delStaff, setDelStaff] = useState<any>(null);
+  const [pwdStaff, setPwdStaff] = useState<any>(null);
+  const [newPwd, setNewPwd] = useState('');
+  const [pwdSaving, setPwdSaving] = useState(false);
 
   useEffect(() => {
     opsApi.settings().then((s) => {
@@ -53,11 +56,19 @@ export default function Settings() {
 
   const createStaff = async () => {
     if (!sform.name.trim() || !sform.email.trim()) return alert('Name and email required');
+    if (!sform.password || sform.password.length < 6) return alert('Please set a password of at least 6 characters and share it with the team member.');
     try { await opsApi.createStaff(sform); setAddStaff(false); setSform({ name: '', email: '', password: '', role: 'operations' }); setStaff(await opsApi.staff()); }
     catch (e: any) { alert(e.message); }
   };
   const changeRole = async (u: any, role: string) => { await opsApi.updateStaffRole(u.user_id, { role }); setStaff(await opsApi.staff()); };
   const removeStaff = async () => { try { await opsApi.deleteStaff(delStaff.user_id); setDelStaff(null); setStaff(await opsApi.staff()); } catch (e: any) { alert(e.message); } };
+  const openPwd = (s: any) => { setNewPwd(''); setPwdStaff(s); };
+  const savePwd = async () => {
+    if (!newPwd || newPwd.length < 6) return alert('Password must be at least 6 characters');
+    setPwdSaving(true);
+    try { await opsApi.setStaffPassword(pwdStaff.user_id, newPwd); alert(`Password updated for ${pwdStaff.name}. Share it with them: ${newPwd}`); setPwdStaff(null); setNewPwd(''); }
+    catch (e: any) { alert(e.message); } finally { setPwdSaving(false); }
+  };
 
   return (
     <View>
@@ -104,6 +115,7 @@ export default function Settings() {
                 <Dropdown value={s.role} onChange={(r) => changeRole(s, r)}
                   options={['admin', 'operations', 'customer_success', 'finance'].map((r) => ({ label: titleCase(r), value: r }))} />
               </View>
+              <Pressable onPress={() => openPwd(s)} style={styles.delBtn}><KeyRound size={16} color={C.textSec} /></Pressable>
               <Pressable onPress={() => setDelStaff(s)} style={styles.delBtn}><Trash2 size={16} color={C.danger} /></Pressable>
             </View>
           ))}
@@ -131,9 +143,20 @@ export default function Settings() {
         </View>}>
         <Field label="Name" required><TextField value={sform.name} onChangeText={(v: string) => setSform((p: any) => ({ ...p, name: v }))} /></Field>
         <Field label="Email" required><TextField value={sform.email} onChangeText={(v: string) => setSform((p: any) => ({ ...p, email: v }))} keyboardType="email-address" /></Field>
-        <Field label="Password"><TextField value={sform.password} onChangeText={(v: string) => setSform((p: any) => ({ ...p, password: v }))} placeholder="Auto-generated if empty" /></Field>
+        <Field label="Password" required><TextField value={sform.password} onChangeText={(v: string) => setSform((p: any) => ({ ...p, password: v }))} placeholder="Min 6 characters — share with the member" /></Field>
         <Field label="Role"><Dropdown value={sform.role} onChange={(r) => setSform((p: any) => ({ ...p, role: r }))}
           options={['admin', 'operations', 'customer_success', 'finance'].map((r) => ({ label: titleCase(r), value: r }))} /></Field>
+      </Sheet>
+
+      <Sheet visible={!!pwdStaff} onClose={() => setPwdStaff(null)} title="Reset Password"
+        footer={<View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: SP.sm }}>
+          <Btn title="Cancel" variant="secondary" small onPress={() => setPwdStaff(null)} />
+          <Btn title="Update Password" small loading={pwdSaving} onPress={savePwd} />
+        </View>}>
+        <Text style={{ color: C.textMute, fontSize: 13, marginBottom: SP.md }}>
+          Set a new password for {pwdStaff?.name} ({pwdStaff?.email}). Share it with them so they can log in.
+        </Text>
+        <Field label="New Password" required><TextField value={newPwd} onChangeText={setNewPwd} placeholder="Min 6 characters" /></Field>
       </Sheet>
 
       <ConfirmDialog visible={!!delStaff} title="Remove team member?" danger

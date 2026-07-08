@@ -1986,6 +1986,19 @@ async def ops_delete_staff(user_id: str, request: Request):
     return {"message": "Staff removed"}
 
 
+@api.put("/ops/staff/{user_id}/password")
+async def ops_set_staff_password(user_id: str, body: dict, request: Request):
+    await require_permission(request, "manage_roles")
+    new_password = (body.get("password") or "").strip()
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target or target.get("role") not in STAFF_ROLES:
+        raise HTTPException(status_code=404, detail="Staff member not found")
+    await db.users.update_one({"user_id": user_id}, {"$set": {"password_hash": hash_password(new_password)}})
+    return {"message": "Password updated"}
+
+
 @api.get("/ops/search")
 async def ops_search(request: Request, q: str):
     await require_permission(request, "view_vendors")

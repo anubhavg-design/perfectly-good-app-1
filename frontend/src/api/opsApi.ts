@@ -80,6 +80,7 @@ export const opsApi = {
   staff: () => apiFetch('/ops/staff'),
   createStaff: (b: any) => apiFetch('/ops/staff', { method: 'POST', body: JSON.stringify(b) }),
   updateStaffRole: (id: string, b: any) => apiFetch(`/ops/staff/${id}/role`, { method: 'PUT', body: JSON.stringify(b) }),
+  setStaffPassword: (id: string, password: string) => apiFetch(`/ops/staff/${id}/password`, { method: 'PUT', body: JSON.stringify({ password }) }),
   deleteStaff: (id: string) => apiFetch(`/ops/staff/${id}`, { method: 'DELETE' }),
 
   search: (q: string) => apiFetch(`/ops/search?q=${encodeURIComponent(q)}`),
