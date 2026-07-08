@@ -1946,12 +1946,14 @@ async def ops_create_staff(body: StaffBody, request: Request):
     await require_permission(request, "manage_roles")
     if body.role not in STAFF_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
+    if len((body.password or "").strip()) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     email = body.email.strip().lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already exists")
     doc = {
         "user_id": gen_id("user"), "email": email, "name": body.name,
-        "password_hash": hash_password(body.password or secrets.token_urlsafe(8)),
+        "password_hash": hash_password(body.password.strip()),
         "role": body.role, "permission_overrides": body.permission_overrides or {},
         "picture": None, "location": None, "created_at": datetime.now(timezone.utc),
     }
