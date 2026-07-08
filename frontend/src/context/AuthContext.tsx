@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authApi, loadToken, setToken } from '../api/client';
-import { registerForPushNotifications, savePushToken } from '../utils/notifications';
+import { registerForPushNotifications, savePushToken, configureNotificationHandler } from '../utils/notifications';
 
 export interface User {
   user_id: string;
@@ -53,6 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    configureNotificationHandler();
     (async () => {
       try {
         await loadToken();

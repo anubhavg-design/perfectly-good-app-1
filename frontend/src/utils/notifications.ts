@@ -4,15 +4,19 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { apiFetch } from '../api/client';
 
-// Configure how notifications appear when app is in foreground
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Configure how notifications appear when app is in foreground.
+// Not run at import time, and skipped in Expo Go (remote push isn't supported there).
+export function configureNotificationHandler() {
+  if (Constants.executionEnvironment === 'storeClient') return; // Expo Go
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
 
 export async function registerForPushNotifications(): Promise<string | null> {
   if (!Device.isDevice) {
@@ -46,13 +50,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 
   try {
-    const projectId =
-      Constants?.expoConfig?.extra?.eas?.projectId ??
-      Constants?.easConfig?.projectId;
-
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: projectId || undefined,
-    });
+    const tokenData = await Notifications.getDevicePushTokenAsync();
     return tokenData.data;
   } catch (err) {
     console.log('Failed to get push token', err);
