@@ -157,8 +157,12 @@ def get_effective_permissions(role: str, overrides: Optional[dict] = None) -> se
 
 
 async def require_permission(request: Request, permission: str) -> dict:
-    """Authenticate and ensure the current user has the given permission."""
+    """Authenticate and ensure the current user is a staff member with the given permission.
+    Ops routes are staff-only: vendors/customers can never access them even if a role
+    happens to share a permission name."""
     user = await get_current_user(request)
+    if user.get("role") not in STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="Staff access only")
     perms = get_effective_permissions(user.get("role", "user"), user.get("permission_overrides"))
     if permission not in perms:
         raise HTTPException(status_code=403, detail=f"Insufficient permissions (requires '{permission}')")

@@ -73,8 +73,11 @@ export default function AuthScreen() {
       const cleanPassword = password.trim();
       if (isLogin) {
         const u = await login(cleanEmail, cleanPassword);
+        const role = (u as any)?.role;
         const staff = ['admin', 'operations', 'customer_success', 'finance'];
-        router.replace(u && staff.includes((u as any).role) ? '/ops' : '/(tabs)/home');
+        if (role && staff.includes(role)) router.replace('/ops');
+        else if (role === 'vendor') router.replace('/(tabs)/dashboard');
+        else router.replace('/(tabs)/home');
       } else {
         await register(name.trim(), cleanEmail, phone.trim(), cleanPassword);
         router.replace('/(tabs)/home');

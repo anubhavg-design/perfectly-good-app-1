@@ -87,7 +87,6 @@ export const opsApi = {
 
   analytics: (days = 30) => apiFetch(`/ops/analytics?days=${days}`),
   vendorPerformance: (id: string) => apiFetch(`/ops/vendors/${id}/performance`),
-  extractMenu: (uri: string, name: string) => postFile('/ops/menu-import/extract', uri, name),
   parseMenuFile: (uri: string, name: string) => postFile('/ops/menu-import/parse-file', uri, name),
   bulkAddMenu: (id: string, items: any[]) => apiFetch(`/ops/vendors/${id}/menu/bulk`, { method: 'POST', body: JSON.stringify({ items }) }),
 };
