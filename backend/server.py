@@ -2029,6 +2029,19 @@ async def ops_mark_paid(body: MarkPaidBody, request: Request):
     return payout_doc
 
 
+@api.get("/ops/payment-failures")
+async def ops_payment_failures(request: Request, page: int = 1, page_size: int = 50):
+    """Failed Razorpay payments logged by the webhook (finance visibility)."""
+    await require_permission(request, "view_finance")
+    total = await db.payment_failures.count_documents({})
+    skip = max(page - 1, 0) * page_size
+    rows = await db.payment_failures.find({}, {"_id": 0}).sort("created_at", -1).skip(skip).limit(page_size).to_list(page_size)
+    for r in rows:
+        if isinstance(r.get("created_at"), datetime):
+            r["created_at"] = r["created_at"].isoformat()
+    return {"items": rows, "total": total, "page": page, "page_size": page_size}
+
+
 @api.get("/ops/settings")
 async def ops_get_settings(request: Request):
     await require_permission(request, "view_dashboard")

@@ -84,6 +84,7 @@ export const opsApi = {
   listUsers: (p?: any) => apiFetch(`/ops/users${qs(p)}`),
 
   payouts: (p?: any) => apiFetch(`/ops/payouts${qs(p)}`),
+  paymentFailures: (p?: any) => apiFetch(`/ops/payment-failures${qs(p)}`),
   payoutHistory: (id: string) => apiFetch(`/ops/payouts/${id}/history`),
   markPaid: (b: any) => apiFetch('/ops/payouts/mark-paid', { method: 'POST', body: JSON.stringify(b) }),
 
