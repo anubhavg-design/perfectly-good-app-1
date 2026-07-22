@@ -804,7 +804,7 @@ async def verify_order(body: VerifyOrderBody, request: Request):
 async def razorpay_webhook(request: Request):
     """Server-to-server confirmation from Razorpay. Reliably finalizes an order
     even if the app is closed before /orders/verify runs. Configure this URL and
-    a secret in the Razorpay Dashboard (events: payment.captured, order.paid)."""
+    a secret in the Razorpay Dashboard (events: payment.captured, order.paid, payment.failed)."""
     raw = await request.body()
     signature = request.headers.get("X-Razorpay-Signature", "")
     webhook_secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
@@ -825,6 +825,29 @@ async def razorpay_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid payload")
 
     event = payload.get("event", "")
+
+    # Handle failed payments: log the attempt and drop the stale pending order so
+    # it doesn't linger. No confirmed order is ever created for a failed payment.
+    if event == "payment.failed":
+        try:
+            entity = payload["payload"]["payment"]["entity"]
+        except Exception:
+            entity = {}
+        rzp_order_id = entity.get("order_id", "")
+        await db.payment_failures.insert_one({
+            "razorpay_order_id": rzp_order_id,
+            "razorpay_payment_id": entity.get("id", ""),
+            "amount": (entity.get("amount") or 0) / 100,
+            "error_code": entity.get("error_code", ""),
+            "error_description": entity.get("error_description", ""),
+            "method": entity.get("method", ""),
+            "created_at": datetime.now(timezone.utc),
+        })
+        if rzp_order_id:
+            await db.pending_orders.delete_one({"razorpay_order_id": rzp_order_id})
+        logger.info(f"Webhook: payment.failed for {rzp_order_id} ({entity.get('error_description', 'no detail')})")
+        return {"status": "failed_logged"}
+
     # Extract the order id + payment id from either payment or order entity
     rzp_order_id = ""
     payment_id = ""
