@@ -34,8 +34,8 @@ export default function CheckoutScreen() {
   const orderLabel = ORDER_LABELS[orderType] || 'Surplus';
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const money = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
-  const price = Number(params.price);
-  const originalPrice = Number(params.originalPrice);
+  const price = Number(params.price) || 0;
+  const originalPrice = Number(params.originalPrice) || 0;
   const maxQty = Number(params.maxQty) > 0 ? Number(params.maxQty) : 99;
   const subtotal = round2(price * quantity);
   const gst = round2(subtotal * 0.05);

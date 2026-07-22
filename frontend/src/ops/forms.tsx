@@ -57,7 +57,7 @@ export function VendorForm({ initial, categories, onSubmit, submitting }: any) {
 
       {/* Storefront photo */}
       <Field label="Storefront Photo">
-        <Pressable onPress={chooseStore}>
+        <Pressable onPress={chooseStore} style={{ marginBottom: SP.md }}>
           {f.storefront_image ? (
             <Image source={{ uri: f.storefront_image }} style={{ width: '100%', height: 150, borderRadius: R.md, backgroundColor: C.surfaceAlt }} />
           ) : (
