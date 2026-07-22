@@ -211,6 +211,9 @@ export const vendorApi = {
   toggleMenuItem: (id: string, in_stock: boolean) =>
     apiFetch(`/vendor/menu/${id}/toggle`, { method: 'PUT', body: JSON.stringify({ in_stock }) }),
 
+  editMenuItem: (id: string, data: { image_url?: string; kcal?: number | null; protein?: number | null }) =>
+    apiFetch(`/vendor/menu/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
   createDrop: (data: { menu_item_id: string; discounted_price: number; quantity_available: number; pickup_start_time: string; pickup_end_time: string; expiry?: string }) =>
     apiFetch('/vendor/drops', { method: 'POST', body: JSON.stringify(data) }),
 

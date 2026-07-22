@@ -1,11 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  ActivityIndicator, RefreshControl, Switch, Alert, ScrollView, TextInput,
+  ActivityIndicator, RefreshControl, Switch, Alert, ScrollView, TextInput, Modal, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List } from 'lucide-react-native';
+import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import { vendorApi } from '../../src/api/client';
@@ -140,12 +141,67 @@ export default function DashboardScreen() {
     }
   };
 
+  // Menu item detail editing (image / kcal / protein) — vendor-controlled fields
+  const [editItem, setEditItem] = useState<any>(null);
+  const [editImage, setEditImage] = useState('');
+  const [editKcal, setEditKcal] = useState('');
+  const [editProtein, setEditProtein] = useState('');
+  const [savingItem, setSavingItem] = useState(false);
+
+  const openEdit = (item: any) => {
+    setEditItem(item);
+    setEditImage(item.image_url || '');
+    setEditKcal(item.kcal != null ? String(item.kcal) : '');
+    setEditProtein(item.protein != null ? String(item.protein) : '');
+  };
+
+  const pickItemImage = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission needed', 'Allow photo access to upload a food image.');
+        return;
+      }
+      const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], base64: true, quality: 0.5 });
+      if (!r.canceled && r.assets?.[0]?.base64) {
+        setEditImage(`data:${r.assets[0].mimeType || 'image/jpeg'};base64,${r.assets[0].base64}`);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Could not pick image');
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editItem) return;
+    setSavingItem(true);
+    try {
+      const payload: any = {};
+      if (editImage) payload.image_url = editImage;
+      payload.kcal = editKcal.trim() === '' ? null : Math.round(Number(editKcal));
+      payload.protein = editProtein.trim() === '' ? null : Number(editProtein);
+      const updated = await vendorApi.editMenuItem(editItem.menu_item_id, payload);
+      setMenu(prev => prev.map(m => m.menu_item_id === editItem.menu_item_id ? { ...m, ...updated } : m));
+      setEditItem(null);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to save');
+    } finally {
+      setSavingItem(false);
+    }
+  };
+
   const renderMenuItem = ({ item }: { item: any }) => {
     const inStock = item.in_stock !== false;
     const isVeg = item.food_type !== 'non_veg';
     return (
       <View testID={`vendor-menu-${item.menu_item_id}`} style={styles.card}>
         <View style={styles.cardRow}>
+          {item.image_url ? (
+            <Image source={{ uri: item.image_url }} style={styles.menuThumb} />
+          ) : (
+            <View style={[styles.menuThumb, styles.menuThumbEmpty]}>
+              <Camera size={18} color={COLORS.textMuted} />
+            </View>
+          )}
           <View style={styles.cardInfo}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <View style={{ width: 12, height: 12, borderRadius: 2, borderWidth: 1.5, borderColor: isVeg ? COLORS.success : COLORS.error, alignItems: 'center', justifyContent: 'center' }}>
@@ -154,15 +210,24 @@ export default function DashboardScreen() {
               <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
             </View>
             <Text style={styles.cardSub}>₹{item.original_price}{item.available_today ? '  ·  Surplus live' : ''}</Text>
+            {(item.kcal != null || item.protein != null) ? (
+              <Text style={styles.cardSub}>{item.kcal != null ? `${item.kcal} kcal` : ''}{item.kcal != null && item.protein != null ? ' · ' : ''}{item.protein != null ? `${item.protein}g protein` : ''}</Text>
+            ) : null}
             <Text style={[styles.cardSub, { color: inStock ? COLORS.success : COLORS.textMuted }]}>{inStock ? 'In stock (visible to customers)' : 'Out of stock (hidden)'}</Text>
           </View>
-          <Switch
-            testID={`toggle-stock-${item.menu_item_id}`}
-            value={inStock}
-            onValueChange={() => toggleStock(item.menu_item_id, inStock)}
-            trackColor={{ false: COLORS.border, true: COLORS.primary + '60' }}
-            thumbColor={inStock ? COLORS.primary : COLORS.textMuted}
-          />
+          <View style={{ alignItems: 'center', gap: 10 }}>
+            <Switch
+              testID={`toggle-stock-${item.menu_item_id}`}
+              value={inStock}
+              onValueChange={() => toggleStock(item.menu_item_id, inStock)}
+              trackColor={{ false: COLORS.border, true: COLORS.primary + '60' }}
+              thumbColor={inStock ? COLORS.primary : COLORS.textMuted}
+            />
+            <TouchableOpacity testID={`edit-item-${item.menu_item_id}`} style={styles.editBtn} onPress={() => openEdit(item)}>
+              <Pencil size={14} color={COLORS.primary} />
+              <Text style={styles.editBtnText}>Edit</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
@@ -452,6 +517,47 @@ export default function DashboardScreen() {
           }
         />
       )}
+
+      {/* Edit menu item (image / kcal / protein) */}
+      <Modal visible={!!editItem} transparent animationType="slide" onRequestClose={() => setEditItem(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle} numberOfLines={1}>{editItem?.name}</Text>
+              <TouchableOpacity testID="close-edit-item" onPress={() => setEditItem(null)} style={styles.modalClose}>
+                <X size={22} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalHint}>Name, price & description are managed by the Perfectly Good team. You can update the photo and nutrition.</Text>
+
+            <TouchableOpacity testID="edit-item-image" onPress={pickItemImage} activeOpacity={0.85} style={{ marginBottom: SPACING.md }}>
+              {editImage ? (
+                <Image source={{ uri: editImage }} style={styles.editImagePreview} />
+              ) : (
+                <View style={styles.editImageEmpty}>
+                  <Camera size={26} color={COLORS.textMuted} />
+                  <Text style={styles.editImageEmptyText}>Tap to upload food photo</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <View style={{ flexDirection: 'row', gap: SPACING.md }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.editLabel}>Calories (kcal)</Text>
+                <TextInput testID="edit-item-kcal" style={styles.editInput} value={editKcal} onChangeText={setEditKcal} placeholder="e.g. 450" placeholderTextColor={COLORS.textMuted} keyboardType="numeric" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.editLabel}>Protein (g)</Text>
+                <TextInput testID="edit-item-protein" style={styles.editInput} value={editProtein} onChangeText={setEditProtein} placeholder="e.g. 22" placeholderTextColor={COLORS.textMuted} keyboardType="numeric" />
+              </View>
+            </View>
+
+            <TouchableOpacity testID="save-item-btn" style={[styles.saveBtn, savingItem && { opacity: 0.7 }]} onPress={saveEdit} disabled={savingItem}>
+              {savingItem ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Save</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -507,4 +613,20 @@ const styles = StyleSheet.create({
   currentLocationText: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, flex: 1 },
   saveBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 14, alignItems: 'center', marginTop: SPACING.sm },
   saveBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Outfit_600SemiBold' },
+  // Menu item edit
+  menuThumb: { width: 48, height: 48, borderRadius: RADIUS.md, backgroundColor: COLORS.skeleton, marginRight: SPACING.sm },
+  menuThumbEmpty: { alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.borderLight },
+  editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: SPACING.sm, paddingVertical: 4, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.primary },
+  editBtnText: { fontSize: 12, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalCard: { backgroundColor: COLORS.surface, borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, padding: SPACING.lg, paddingBottom: SPACING.xxl },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.xs },
+  modalTitle: { flex: 1, fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  modalClose: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  modalHint: { fontSize: 12.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginBottom: SPACING.md },
+  editImagePreview: { width: '100%', height: 160, borderRadius: RADIUS.md, backgroundColor: COLORS.skeleton },
+  editImageEmpty: { height: 130, borderRadius: RADIUS.md, borderWidth: 1, borderStyle: 'dashed', borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  editImageEmptyText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textMuted },
+  editLabel: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginBottom: SPACING.xs },
+  editInput: { backgroundColor: COLORS.background, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, paddingVertical: 12, fontSize: 15, fontFamily: 'DMSans_400Regular', color: COLORS.textPrimary },
 });

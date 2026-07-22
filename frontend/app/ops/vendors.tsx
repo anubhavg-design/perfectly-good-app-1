@@ -14,6 +14,7 @@ export default function Vendors() {
   const { user } = useAuth();
   const params = useLocalSearchParams();
   const canManage = hasPerm(user, 'manage_vendors');
+  const isAdmin = user?.role === 'admin';
 
   const [data, setData] = useState<any>({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
@@ -68,6 +69,8 @@ export default function Vendors() {
       </Pressable>
     ) },
     { key: 'category', label: 'Category', width: 110 },
+    { key: 'discount_percentage', label: 'Discount', width: 80, render: (r: any) => <Text style={{ fontSize: 13 }}>{r.discount_percentage ? `${r.discount_percentage}%` : '—'}</Text> },
+    { key: 'assigned_ops_name', label: 'Assigned Ops', width: 130, render: (r: any) => <Text style={{ fontSize: 12.5, color: C.textSec }}>{r.assigned_ops_name || 'Unassigned'}</Text> },
     { key: 'phone', label: 'Phone', width: 120, render: (r: any) => <Text style={{ fontSize: 13 }}>{r.phone || '—'}</Text> },
     { key: 'service_type', label: 'Service', width: 90, render: (r: any) => <Text style={{ fontSize: 13 }}>{titleCase(r.service_type)}</Text> },
     { key: 'full_address', label: 'Address', width: 180, render: (r: any) => <Text style={{ fontSize: 12.5, color: C.textSec }} numberOfLines={2}>{r.full_address || '—'}</Text> },
@@ -81,7 +84,7 @@ export default function Vendors() {
         <IconBtn icon={UtensilsCrossed} tip="Menu" onPress={() => router.push(`/ops/vendor/${r.vendor_id}`)} />
         {canManage && <IconBtn icon={Pencil} tip="Edit" onPress={() => { setEditing(r); setShowForm(true); }} />}
         {canManage && <IconBtn icon={Power} tip="Toggle" color={r.status === 'inactive' ? C.success : C.warn} onPress={() => doToggleStatus(r)} />}
-        {canManage && <IconBtn icon={Trash2} tip="Delete" color={C.danger} onPress={() => setConfirm(r)} />}
+        {isAdmin && <IconBtn icon={Trash2} tip="Delete" color={C.danger} onPress={() => setConfirm(r)} />}
       </View>
     ) },
   ];

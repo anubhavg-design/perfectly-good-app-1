@@ -70,7 +70,11 @@ export default function VendorProfile() {
       {/* Header */}
       <Card style={{ marginBottom: SP.lg }}>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: SP.md, flexWrap: 'wrap' }}>
-          <View style={styles.vendorIcon}><Store size={26} color={C.primaryDark} /></View>
+          {v.storefront_image ? (
+            <Image source={{ uri: v.storefront_image }} style={styles.storeImg} />
+          ) : (
+            <View style={styles.vendorIcon}><Store size={26} color={C.primaryDark} /></View>
+          )}
           <View style={{ flex: 1, minWidth: 200 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP.sm, flexWrap: 'wrap' }}>
               <Text style={styles.vName}>{v.name}</Text>
@@ -89,7 +93,8 @@ export default function VendorProfile() {
           <Info icon={Phone} label="Restaurant Phone" value={v.restaurant_phone || '—'} />
           <Info icon={Mail} label="Email" value={v.email || '—'} />
           <Info icon={MapPin} label="Address" value={v.full_address || '—'} />
-          <Info label="Assigned Ops" value={v.assigned_ops || 'Unassigned'} />
+          <Info label="Assigned Ops" value={v.assigned_ops_name || 'Unassigned'} />
+          <Info label="Discount %" value={v.discount_percentage ? `${v.discount_percentage}% (Takeaway/Dine-in)` : 'None'} />
           <Info label="Pickup Window" value={`${v.pickup_start_time || '—'} – ${v.pickup_end_time || '—'}`} />
           <Info label="Created" value={fmtDate(v.created_at)} />
           <Info label="Last Updated" value={fmtDate(v.updated_at)} />
@@ -252,6 +257,7 @@ function Mini({ icon: Icon, onPress, color = C.textSec }: any) {
 
 const styles = StyleSheet.create({
   vendorIcon: { width: 56, height: 56, borderRadius: R.md, backgroundColor: C.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  storeImg: { width: 72, height: 72, borderRadius: R.md, backgroundColor: C.surfaceAlt },
   vName: { fontSize: 21, fontWeight: '800', color: C.text },
   infoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.lg, marginTop: SP.lg, paddingTop: SP.lg, borderTopWidth: 1, borderTopColor: C.border },
   info: { minWidth: 150 },

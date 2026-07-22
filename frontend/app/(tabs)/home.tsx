@@ -134,8 +134,8 @@ export default function HomeScreen() {
       onPress={() => router.push(`/restaurant/${item.vendor_id}`)}
       activeOpacity={0.85}
     >
-      {item.logo_url ? (
-        <Image source={{ uri: item.logo_url }} style={styles.restLogo} />
+      {item.storefront_image || item.logo_url ? (
+        <Image source={{ uri: item.storefront_image || item.logo_url }} style={styles.restLogo} />
       ) : (
         <View style={[styles.restLogo, styles.restLogoPlaceholder]}>
           <Text style={styles.restLogoInitial}>{(item.name || '?').charAt(0).toUpperCase()}</Text>
@@ -149,6 +149,11 @@ export default function HomeScreen() {
             <View style={styles.restMeta}>
               <MapPin size={12} color={COLORS.textMuted} />
               <Text style={styles.restMetaText}>{item.distance} km</Text>
+            </View>
+          ) : null}
+          {item.discount_percentage > 0 ? (
+            <View style={styles.discountPill}>
+              <Text style={styles.discountPillText}>{item.discount_percentage}% OFF</Text>
             </View>
           ) : null}
           {item.surplus_count > 0 ? (
@@ -374,6 +379,8 @@ const styles = StyleSheet.create({
   restMetaText: { fontSize: 12, fontFamily: 'DMSans_500Medium', color: COLORS.textMuted },
   surplusPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: COLORS.primary + '15', borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm, paddingVertical: 2 },
   surplusPillText: { fontSize: 11.5, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
+  discountPill: { backgroundColor: COLORS.accentUrgent + '18', borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm, paddingVertical: 2 },
+  discountPillText: { fontSize: 11.5, fontFamily: 'DMSans_700Bold', color: COLORS.accentUrgent },
 
   emptyState: { alignItems: 'center', paddingTop: 40 },
   emptyTitle: { fontSize: 20, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginBottom: SPACING.xs },

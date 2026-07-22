@@ -67,6 +67,7 @@ export const opsApi = {
   updateVendor: (id: string, b: any) => apiFetch(`/ops/vendors/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   vendorStatus: (id: string, status: string) => apiFetch(`/ops/vendors/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   deleteVendor: (id: string) => apiFetch(`/ops/vendors/${id}`, { method: 'DELETE' }),
+  assignableOps: () => apiFetch('/ops/assignable-ops'),
   addNote: (id: string, note: string) => apiFetch(`/ops/vendors/${id}/notes`, { method: 'POST', body: JSON.stringify({ note }) }),
 
   vendorMenu: (id: string) => apiFetch(`/ops/vendors/${id}/menu`),

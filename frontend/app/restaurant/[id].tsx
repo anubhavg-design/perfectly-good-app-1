@@ -65,12 +65,13 @@ export default function RestaurantScreen() {
 
   const goToCheckout = (item: any, orderType: Tab) => {
     const isSurplus = orderType === 'surplus';
+    const payPrice = item.price != null ? item.price : (isSurplus ? item.discounted_price : item.original_price);
     router.push({
       pathname: '/checkout',
       params: {
         itemId: item.menu_item_id || item.item_id,
         name: item.name,
-        price: String(isSurplus ? item.discounted_price : item.original_price),
+        price: String(payPrice),
         originalPrice: String(item.original_price),
         vendorName: vendor.name,
         maxQty: String(isSurplus ? (item.quantity_available ?? 0) : 0),
@@ -90,8 +91,8 @@ export default function RestaurantScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: SPACING.xxl }}>
         {/* Hero / header */}
         <View style={styles.hero}>
-          {vendor.logo_url ? (
-            <Image source={{ uri: vendor.logo_url }} style={styles.heroImage} />
+          {vendor.storefront_image || vendor.logo_url ? (
+            <Image source={{ uri: vendor.storefront_image || vendor.logo_url }} style={styles.heroImage} />
           ) : (
             <View style={[styles.heroImage, styles.heroPlaceholder]}>
               <Text style={styles.heroInitial}>{(vendor.name || '?').charAt(0).toUpperCase()}</Text>
@@ -230,12 +231,23 @@ function MenuRow({ item, surplus, onPress }: { item: any; surplus?: boolean; onP
           <Text style={styles.rowName} numberOfLines={1}>{item.name}</Text>
         </View>
         {item.description ? <Text style={styles.rowDesc} numberOfLines={2}>{item.description}</Text> : null}
+        {(item.kcal || item.protein) ? (
+          <Text style={styles.rowMacro}>
+            {item.kcal ? `${item.kcal} kcal` : ''}{item.kcal && item.protein ? ' · ' : ''}{item.protein ? `${item.protein}g protein` : ''}
+          </Text>
+        ) : null}
         <View style={styles.rowPriceLine}>
           {surplus ? (
             <>
               <Text style={styles.rowPriceSurplus}>₹{item.discounted_price}</Text>
               <Text style={styles.rowPriceStrike}>₹{item.original_price}</Text>
               {item.discount > 0 ? <Text style={styles.rowDiscount}>{item.discount}% OFF</Text> : null}
+            </>
+          ) : (item.price != null && item.price < item.original_price) ? (
+            <>
+              <Text style={styles.rowPrice}>₹{item.price}</Text>
+              <Text style={styles.rowPriceStrike}>₹{item.original_price}</Text>
+              {item.discount_percentage > 0 ? <Text style={styles.rowDiscount}>{item.discount_percentage}% OFF</Text> : null}
             </>
           ) : (
             <Text style={styles.rowPrice}>₹{item.original_price}</Text>
@@ -317,6 +329,7 @@ const styles = StyleSheet.create({
   vegDotInner: { width: 6, height: 6, borderRadius: 3 },
   rowName: { flex: 1, fontSize: 15, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
   rowDesc: { fontSize: 12.5, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, marginTop: 2 },
+  rowMacro: { fontSize: 11.5, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary, marginTop: 2 },
   rowPriceLine: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginTop: 4 },
   rowPrice: { fontSize: 16, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
   rowPriceSurplus: { fontSize: 16, fontFamily: 'Outfit_700Bold', color: COLORS.primary },

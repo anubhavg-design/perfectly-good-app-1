@@ -521,15 +521,24 @@ def _vendor_public(v: dict) -> dict:
         "service_type": v.get("service_type", "both"),
         "location": v.get("location", {}),
         "logo_url": v.get("logo_url", ""),
+        "storefront_image": v.get("storefront_image", ""),
+        "discount_percentage": v.get("discount_percentage", 0) or 0,
         "pickup_start_time": v.get("pickup_start_time", ""),
         "pickup_end_time": v.get("pickup_end_time", ""),
     }
 
-def _menu_public(m: dict, order_type: str) -> dict:
-    """Shape a menu_item for the customer. Surplus uses discounted_price; takeaway/dine-in use the menu (original) price."""
+async def _ops_name_map() -> dict:
+    """Map operations staff user_id -> display name (for vendor assignment)."""
+    ops = await db.users.find({"role": "operations"}, {"_id": 0, "user_id": 1, "name": 1, "email": 1}).to_list(500)
+    return {o["user_id"]: (o.get("name") or o.get("email") or "") for o in ops}
+
+def _menu_public(m: dict, order_type: str, discount_pct: float = 0) -> dict:
+    """Shape a menu_item for the customer. Surplus uses discounted_price; takeaway/dine-in use the menu (original) price with the vendor's flat discount applied."""
     op = m.get("original_price") or 0
     dp = m.get("discounted_price") or 0
     is_surplus = order_type == "surplus"
+    disc = discount_pct or 0
+    takeaway_price = round(op * (1 - disc / 100), 2) if op else 0
     out = {
         "menu_item_id": m.get("menu_item_id"),
         "item_id": m.get("menu_item_id"),
@@ -540,8 +549,10 @@ def _menu_public(m: dict, order_type: str) -> dict:
         "contains_egg": bool(m.get("contains_egg")),
         "serving_size": m.get("serving_size", ""),
         "category": m.get("category", ""),
+        "kcal": m.get("kcal"),
+        "protein": m.get("protein"),
         "original_price": op,
-        "price": dp if is_surplus else op,
+        "price": dp if is_surplus else takeaway_price,
         "available_today": bool(m.get("available_today")),
     }
     if is_surplus:
@@ -549,6 +560,8 @@ def _menu_public(m: dict, order_type: str) -> dict:
         out["quantity_available"] = m.get("quantity_available")
         out["expiry"] = m.get("expiry", "")
         out["discount"] = round(((op - dp) / op) * 100) if op else 0
+    else:
+        out["discount_percentage"] = disc
     return out
 
 @api.get("/restaurants")
@@ -603,8 +616,9 @@ async def get_restaurant(vendor_id: str):
         raise HTTPException(status_code=404, detail="Restaurant not found")
     items = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(1000)
     in_stock = lambda m: m.get("in_stock", True) is not False
-    surplus_items = [_menu_public(m, "surplus") for m in items if m.get("available_today") and in_stock(m)]
-    menu_items = [_menu_public(m, "takeaway") for m in items if in_stock(m)]
+    disc = v.get("discount_percentage") or 0
+    surplus_items = [_menu_public(m, "surplus", disc) for m in items if m.get("available_today") and in_stock(m)]
+    menu_items = [_menu_public(m, "takeaway", disc) for m in items if in_stock(m)]
     return {
         "vendor": _vendor_public(v),
         "surplus_items": surplus_items,
@@ -643,10 +657,14 @@ async def create_order(body: CreateOrderBody, request: Request):
         unit_price = item.get("discounted_price") or 0
     else:
         # Takeaway / Dine-in: order from the regular menu at menu (original) price
+        # with the vendor's flat discount applied.
         item = await db.menu_items.find_one({"menu_item_id": body.food_item_id}, {"_id": 0})
         if not item:
             raise HTTPException(status_code=404, detail="Item not found")
-        unit_price = item.get("original_price") or item.get("discounted_price") or 0
+        vendor = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
+        disc = (vendor or {}).get("discount_percentage") or 0
+        base_price = item.get("original_price") or item.get("discounted_price") or 0
+        unit_price = round(base_price * (1 - disc / 100), 2)
 
     cfg = await get_settings_doc()
     subtotal = round(unit_price * body.quantity, 2)
@@ -1005,6 +1023,39 @@ async def toggle_vendor_drop(item_id: str, body: ToggleDropBody, request: Reques
 
 class ToggleStockBody(BaseModel):
     in_stock: bool
+
+
+class VendorMenuEditBody(BaseModel):
+    image_url: Optional[str] = None
+    kcal: Optional[int] = None
+    protein: Optional[float] = None
+
+
+@api.put("/vendor/menu/{item_id}")
+async def vendor_edit_menu_item(item_id: str, body: VendorMenuEditBody, request: Request):
+    """Vendor edits ONLY the image, kcal and protein of their own menu item.
+    Name / price / description remain Ops-controlled."""
+    user = await get_current_user(request)
+    if user["role"] not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    updates: dict = {"updated_at": datetime.now(timezone.utc)}
+    if body.image_url is not None:
+        updates["image_url"] = body.image_url
+    if body.kcal is not None:
+        updates["kcal"] = body.kcal
+    if body.protein is not None:
+        updates["protein"] = body.protein
+    result = await db.menu_items.update_one(
+        {"menu_item_id": item_id, "vendor_id": vendor["vendor_id"]},
+        {"$set": updates},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    updated = await db.menu_items.find_one({"menu_item_id": item_id}, {"_id": 0})
+    return updated
 
 
 @api.put("/vendor/menu/{item_id}/toggle")
@@ -1382,6 +1433,8 @@ class OpsVendorBody(BaseModel):
     pickup_end_time: Optional[str] = "21:00"
     status: Optional[str] = "active"
     assigned_ops: Optional[str] = ""
+    discount_percentage: Optional[float] = 0
+    storefront_image: Optional[str] = ""
 
 class OpsMenuItemBody(BaseModel):
     name: str
@@ -1498,8 +1551,11 @@ async def _vendor_aggregates(vendor_ids: list) -> dict:
 @api.get("/ops/vendors")
 async def ops_list_vendors(request: Request, search: Optional[str] = None, category: Optional[str] = None,
                            status: Optional[str] = None, page: int = 1, page_size: int = 25):
-    await require_permission(request, "view_vendors")
+    user = await require_permission(request, "view_vendors")
     query: dict = {}
+    # Operations staff can only ever see the vendors assigned to them.
+    if user.get("role") == "operations":
+        query["assigned_ops"] = user["user_id"]
     if search:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
@@ -1514,11 +1570,13 @@ async def ops_list_vendors(request: Request, search: Optional[str] = None, categ
     skip = max(page - 1, 0) * page_size
     vendors = await db.vendors.find(query, {"_id": 0}).sort("name", 1).skip(skip).limit(page_size).to_list(page_size)
     agg = await _vendor_aggregates([v["vendor_id"] for v in vendors])
+    ops_names = await _ops_name_map()
     for v in vendors:
         a = agg.get(v["vendor_id"], {})
         v["menu_count"] = a.get("menu_count", 0)
         v["order_count"] = a.get("order_count", 0)
         v["revenue"] = a.get("revenue", 0)
+        v["assigned_ops_name"] = ops_names.get(v.get("assigned_ops", ""), "")
         for k in ("created_at", "updated_at", "last_order_date"):
             if isinstance(v.get(k), datetime):
                 v[k] = v[k].isoformat()
@@ -1527,7 +1585,7 @@ async def ops_list_vendors(request: Request, search: Optional[str] = None, categ
 
 @api.post("/ops/vendors")
 async def ops_create_vendor(body: OpsVendorBody, request: Request):
-    await require_permission(request, "manage_vendors")
+    user = await require_permission(request, "manage_vendors")
     email = body.email.strip().lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already exists")
@@ -1549,6 +1607,8 @@ async def ops_create_vendor(body: OpsVendorBody, request: Request):
         "created_at": datetime.now(timezone.utc),
     })
     now = datetime.now(timezone.utc)
+    # Operations staff can only create vendors assigned to themselves; admin assigns freely.
+    assigned = user["user_id"] if user.get("role") == "operations" else (body.assigned_ops or "")
     vendor_doc = {
         "vendor_id": vendor_id, "user_id": user_id, "name": body.name,
         "owner_name": body.owner_name or "", "category": body.category, "email": email,
@@ -1556,7 +1616,9 @@ async def ops_create_vendor(body: OpsVendorBody, request: Request):
         "full_address": body.full_address or "", "maps_link": body.maps_link or "",
         "location": location, "logo_url": "", "service_type": body.service_type or "both",
         "pickup_start_time": body.pickup_start_time or "18:00", "pickup_end_time": body.pickup_end_time or "21:00",
-        "status": body.status or "active", "assigned_ops": body.assigned_ops or "",
+        "status": body.status or "active", "assigned_ops": assigned,
+        "discount_percentage": max(0.0, min(float(body.discount_percentage or 0), 90.0)),
+        "storefront_image": body.storefront_image or "",
         "notes": [], "created_at": now, "updated_at": now, "last_order_date": None,
     }
     await db.vendors.insert_one(vendor_doc)
@@ -1568,11 +1630,15 @@ async def ops_create_vendor(body: OpsVendorBody, request: Request):
 
 @api.get("/ops/vendors/{vendor_id}")
 async def ops_vendor_detail(vendor_id: str, request: Request):
-    await require_permission(request, "view_vendors")
+    user = await require_permission(request, "view_vendors")
     cfg = await get_settings_doc()
     v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     if not v:
         raise HTTPException(status_code=404, detail="Vendor not found")
+    if user.get("role") == "operations" and v.get("assigned_ops") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="This vendor is not assigned to you")
+    ops_names = await _ops_name_map()
+    v["assigned_ops_name"] = ops_names.get(v.get("assigned_ops", ""), "")
     menu = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(1000)
     for m in menu:
         for k in ("created_at", "updated_at"):
@@ -1605,18 +1671,25 @@ async def ops_vendor_detail(vendor_id: str, request: Request):
 
 @api.put("/ops/vendors/{vendor_id}")
 async def ops_update_vendor(vendor_id: str, body: OpsVendorBody, request: Request):
-    await require_permission(request, "manage_vendors")
+    user = await require_permission(request, "manage_vendors")
     v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     if not v:
         raise HTTPException(status_code=404, detail="Vendor not found")
+    if user.get("role") == "operations" and v.get("assigned_ops") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="This vendor is not assigned to you")
     updates = {
         "name": body.name, "owner_name": body.owner_name or "", "category": body.category,
         "phone": body.phone or "", "restaurant_phone": body.restaurant_phone or "",
         "full_address": body.full_address or "", "maps_link": body.maps_link or "",
         "service_type": body.service_type or "both", "pickup_start_time": body.pickup_start_time or "18:00",
         "pickup_end_time": body.pickup_end_time or "21:00", "status": body.status or "active",
-        "assigned_ops": body.assigned_ops or "", "updated_at": datetime.now(timezone.utc),
+        "discount_percentage": max(0.0, min(float(body.discount_percentage or 0), 90.0)),
+        "storefront_image": body.storefront_image or "",
+        "updated_at": datetime.now(timezone.utc),
     }
+    # Only admins may (re)assign vendors to an ops member.
+    if user.get("role") == "admin":
+        updates["assigned_ops"] = body.assigned_ops or ""
     if body.full_address and body.full_address != v.get("full_address"):
         loc = geocode_address(body.full_address)
         if loc:
@@ -1641,7 +1714,9 @@ async def ops_vendor_status(vendor_id: str, body: dict, request: Request):
 
 @api.delete("/ops/vendors/{vendor_id}")
 async def ops_delete_vendor(vendor_id: str, request: Request):
-    await require_permission(request, "manage_vendors")
+    user = await require_permission(request, "manage_vendors")
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin can delete vendors")
     vendor = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
@@ -1955,6 +2030,14 @@ async def ops_update_settings(body: dict, request: Request):
 async def ops_roles(request: Request):
     await require_permission(request, "view_dashboard")
     return {"permissions": PERMISSIONS, "roles": {r: sorted(p) for r, p in ROLE_PERMISSIONS.items() if r in STAFF_ROLES}}
+
+
+@api.get("/ops/assignable-ops")
+async def ops_assignable(request: Request):
+    """Operations staff that a vendor can be assigned to (admin uses this for the picker)."""
+    await require_permission(request, "manage_vendors")
+    staff = await db.users.find({"role": "operations"}, {"_id": 0, "user_id": 1, "name": 1, "email": 1}).to_list(500)
+    return [{"user_id": s["user_id"], "name": s.get("name") or s.get("email") or "", "email": s.get("email", "")} for s in staff]
 
 
 @api.get("/ops/staff")
@@ -2568,6 +2651,7 @@ async def migrate_v2():
             "owner_name": "", "restaurant_phone": "", "full_address": v.get("location", {}).get("address", "") if isinstance(v.get("location"), dict) else "",
             "maps_link": v.get("location", {}).get("maps_url", "") if isinstance(v.get("location"), dict) else "",
             "assigned_ops": "", "notes": [], "pickup_start_time": "18:00", "pickup_end_time": "21:00",
+            "discount_percentage": 0, "storefront_image": "",
             "created_at": now, "updated_at": now, "last_order_date": None,
         }
         for k, val in defaults.items():

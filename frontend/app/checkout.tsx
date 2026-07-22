@@ -232,7 +232,7 @@ export default function CheckoutScreen() {
               <Text style={styles.priceValue}>₹{money(gst)}</Text>
             </View>
             <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Convenience Fee</Text>
+              <Text style={styles.priceLabel}>Payment gateway fees</Text>
               <Text style={styles.priceValue}>₹{money(convenienceFee)}</Text>
             </View>
             <View style={styles.divider} />

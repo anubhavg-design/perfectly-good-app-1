@@ -1,0 +1,46 @@
+{
+  "summary": "Jan-2026 feature batch (per-vendor discount, storefront photo, Ops RBAC visibility/delete/assign, vendor menu image+nutrition edit, 'Payment gateway fees' label) verified end-to-end on both backend and web frontend. Backend: 15/15 pytest tests pass in new file test_discounts_and_rbac.py — GET /api/restaurants/dv_namma returns discount_percentage=20 + storefront_image + Masala Dosa price=96 (from original 120), surplus stays independently ≥30% off; POST /api/orders/create with order_type=takeaway/dine_in charges the discounted unit price (Razorpay amount=21120 paise for qty 2 × ₹96 with 5%GST+5%conv); GET /api/ops/vendors as operations returns only vendors with assigned_ops=self (0 for operations@perfectlygood.in seed), admin sees all; GET /api/ops/vendors/dv_namma as ops = 403 (not assigned) & 200 as admin; DELETE /api/ops/vendors as ops = 403, as admin succeeds; GET /api/ops/assignable-ops returns list of operations staff; PUT /api/ops/vendors ignores assigned_ops when caller is operations (admin can (re)assign or unassign); PUT /api/vendor/menu/{id} updates only image_url/kcal/protein and preserves name/original_price/description, and returns 404 for a foreign-vendor item. Frontend (web /ops, desktop 1440x900): Admin login → Vendors page shows DISCOUNT + ASSIGNED OPS columns and Namma Tiffins row shows '20%'; Add Vendor sheet contains 'Storefront Photo' upload, 'Discount % (Takeaway/Dine-in)' input, and 'Assign to Operations' dropdown; delete (Trash) icon visible for admin in Actions column. Operations login (operations@perfectlygood.in/ops12345) → 'Vendors' header shows '0 total' + 'No vendors found' (RBAC empty), sidebar has no Users/Payouts, and Add Vendor sheet DOES NOT show the 'Assign to Operations' dropdown (correctly admin-only). Frontend (customer mobile 390x844): /restaurant/dv_namma → Surplus tab shows Masala Dosa ₹70/₹120 42% OFF; Takeaway & Dine-in tabs both show 20% OFF pill with ₹96 next to strikethrough ₹120. Home 'Nearby Restaurants' card shows 20% OFF pill for Namma Tiffins. Checkout page shows the new label 'Payment gateway fees' (no more 'Convenience Fee'). Frontend (vendor mobile web): Dashboard→Menu tab lists 4 items each with an Edit button (testID edit-item-{id}); modal explains 'Name, price & description are managed by the Perfectly Good team. You can update the photo and nutrition.', kcal+protein persisted via PUT /api/vendor/menu/{id} and Masala Dosa immediately reflects '450 kcal · 18g protein' after Save. No deprecated Expo packages, no red-screen errors, no console errors during the flow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "VendorForm (src/ops/forms.tsx) → Storefront Photo placeholder", "issue": "The dashed 'Tap to upload storefront photo' placeholder (height 120) sits so close to the next row that its centered text visually overlaps the 'Vendor Name' / 'Owner Name' labels beneath it (see /tmp/add_vendor.png). Add marginBottom on the placeholder or the Field wrapper to guarantee 12–16px separation.", "testID": "vendorform-storefront-placeholder", "priority": "LOW"},
+      {"component": "Checkout screen when opened without cart state (/checkout direct URL)", "issue": "Direct navigation to /checkout without going through Reserve/Order shows Subtotal, GST, Payment gateway fees, and Total as '₹NaN' and the CTA becomes 'Pay ₹NaN'. Consider redirecting to Home or showing an empty-cart state when route params/state are missing.", "testID": "checkout-price-breakdown", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Ops Add/Edit Vendor sheet (desktop)", "issues": ["Storefront placeholder text overlaps first-row form labels"]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_discounts_and_rbac.py",
+    "/app/test_reports/pytest/pytest_iter14.xml"
+  ],
+  "action_items": [
+    "(Low) Increase vertical spacing between the Storefront Photo placeholder (VendorForm) and the first form-field row so the centered 'Tap to upload…' hint does not overlap the 'Vendor Name'/'Owner Name' labels.",
+    "(Low) Guard /checkout against missing cart/route params — redirect to Home or show an empty-cart state instead of rendering ₹NaN in the price breakdown."
+  ],
+  "critical_code_review_comments": [
+    "server.py::_menu_public correctly applies the vendor flat discount to takeaway/dine-in and leaves surplus at discounted_price; response now includes discount_percentage for non-surplus rows so the UI can render the % OFF pill.",
+    "server.py::create_order fetches the vendor for takeaway/dine-in and computes unit_price = original_price * (1 − discount/100). The unit_price and item_subtotal are persisted on the pending_order so verify_order/_finalize_order use the same discounted amount (no double-computation).",
+    "server.py: ops_list_vendors filters by assigned_ops=user_id for role=operations; ops_vendor_detail + ops_update_vendor 403 when the requested vendor is not assigned; ops_delete_vendor explicitly 403 unless user.role=='admin'; ops_update_vendor only writes assigned_ops when the caller is admin. RBAC is airtight.",
+    "server.py::vendor_edit_menu_item strictly whitelists image_url/kcal/protein via Pydantic (VendorMenuEditBody has no name/price/description fields), so even a hostile payload like {'name':'HACKED'} cannot overwrite Ops-controlled fields — extra fields are dropped by FastAPI. Also scopes the update by vendor_id, so a foreign item returns 404.",
+    "frontend/src/ops/forms.tsx clamps discount_percentage to 0–90 client-side and the server clamps again with max(0, min(v, 90)) — good defense in depth.",
+    "checkout.tsx line 235 uses the exact new copy 'Payment gateway fees' — no stale 'Convenience Fee' string remains in customer-facing screens.",
+    "dashboard.tsx (vendor Menu tab) reads item.kcal/item.protein on the edit modal, uses expo-image-picker (base64) for the photo upload, and PUTs {image_url, kcal, protein} to /api/vendor/menu/{id}. testIDs edit-item-{id}, edit-item-kcal, edit-item-protein, save-item-btn are in place."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_discounts_and_rbac.py (new — 15 tests covering discount pricing, order creation, ops RBAC visibility & delete, assignable-ops + assignment ignore-for-ops, vendor menu whitelisted edit)"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15)",
+    "frontend": "100% (admin & ops /ops sheets, customer restaurant + home + checkout, vendor menu edit modal — all verified)"
+  },
+  "seed_data_creation": "Ephemeral: two admin-created TEST_ vendors used by DeleteVendorRBAC + AssignmentRBAC tests are deleted in-test (tests use try/finally). One TEST_pricing customer account remains in DB (register endpoint has no delete API and the timestamped email is unique). No permanent seed changes.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "1) operations@perfectlygood.in has zero vendors assigned in seed — tests that need an ops with vendors should have admin PUT assigned_ops first. 2) /api/orders/create response returns only {razorpay_order_id, key_id, amount(paise)}; assert on `amount` not `subtotal`. 3) /api/auth/register REQUIRES phone (422 without it). 4) vendor@demo.com IS dv_namma (Namma Tiffins) — a 'foreign vendor' item must be pulled from a different vendor_id (e.g. dv_burger). 5) On the /ops login screen there are two 'Log In' matches (tab + submit); use .last for submit. 6) Direct /checkout without cart params renders ₹NaN — always drive checkout through the Reserve/Order flow. 7) Vendor mobile menu Edit button testIDs are `edit-item-{menu_item_id}`, `edit-item-kcal`, `edit-item-protein`, `save-item-btn`. 8) Customer home surplus carousel intercepts the 'Namma Tiffins' text tap (it goes to /drop/dv_namma_dosa); to reach the restaurant page reliably navigate directly to /restaurant/dv_namma."
+}
