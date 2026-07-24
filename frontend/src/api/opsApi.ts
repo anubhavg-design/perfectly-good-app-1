@@ -1,4 +1,6 @@
 import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { apiFetch, getToken } from './client';
 
 const API = (() => {
@@ -34,6 +36,15 @@ async function postFile(path: string, uri: string, name: string) {
   return data;
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 export async function downloadExport(entity: string, format: 'csv' | 'xlsx') {
   const token = await getToken();
   const res = await fetch(`${API}/ops/export/${entity}?format=${format}`, {
@@ -41,14 +52,31 @@ export async function downloadExport(entity: string, format: 'csv' | 'xlsx') {
   });
   if (!res.ok) throw new Error('Export failed');
   const blob = await res.blob();
+  const filename = `${entity}.${format}`;
+  const mime = format === 'csv'
+    ? 'text/csv'
+    : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
   if (Platform.OS === 'web') {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `${entity}.${format}`; a.click();
+    a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
-  } else {
-    throw new Error('Exports download from the web dashboard.');
+    return;
   }
+
+  // Native (Expo Go / built app): write to cache then open the share/save sheet.
+  const base64 = await blobToBase64(blob);
+  const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+  await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+  if (!(await Sharing.isAvailableAsync())) {
+    throw new Error('Sharing is not available on this device.');
+  }
+  await Sharing.shareAsync(fileUri, {
+    mimeType: mime,
+    dialogTitle: `Export ${entity}`,
+    UTI: format === 'csv' ? 'public.comma-separated-values-text' : 'org.openxmlformats.spreadsheetml.sheet',
+  });
 }
 
 const qs = (o: Record<string, any> = {}) => {

@@ -2313,14 +2313,22 @@ async def ops_bulk_add_menu(vendor_id: str, body: dict, request: Request):
     return {"created": len(docs)}
 
 
-async def _export_dataset(entity: str):
+async def _export_dataset(entity: str, user: Optional[dict] = None):
     cfg = await get_settings_doc()
     if entity == "vendors":
-        vendors = await db.vendors.find({}, {"_id": 0}).to_list(5000)
+        query: dict = {}
+        # Operations staff export only the vendors assigned to them.
+        if user and user.get("role") == "operations":
+            query["assigned_ops"] = user["user_id"]
+        vendors = await db.vendors.find(query, {"_id": 0}).to_list(5000)
         agg = await _vendor_aggregates([v["vendor_id"] for v in vendors])
-        header = ["Vendor", "Owner", "Category", "Phone", "Email", "Service Type", "Status", "Menu Items", "Orders", "Revenue", "Date Added"]
+        ops_names = await _ops_name_map()
+        header = ["Vendor", "Owner", "Category", "Phone", "Email", "Service Type", "Status",
+                  "Discount %", "Assigned Ops", "Menu Items", "Orders", "Revenue", "Date Added"]
         rows = [[v.get("name"), v.get("owner_name"), v.get("category"), v.get("phone"), v.get("email"),
-                 v.get("service_type"), v.get("status"), agg.get(v["vendor_id"], {}).get("menu_count", 0),
+                 v.get("service_type"), v.get("status"), v.get("discount_percentage", 0) or 0,
+                 ops_names.get(v.get("assigned_ops", ""), "") or "Unassigned",
+                 agg.get(v["vendor_id"], {}).get("menu_count", 0),
                  agg.get(v["vendor_id"], {}).get("order_count", 0), agg.get(v["vendor_id"], {}).get("revenue", 0),
                  fmt_dt(v.get("created_at"))] for v in vendors]
         return header, rows
@@ -2380,7 +2388,8 @@ async def ops_export(entity: str, request: Request, format: str = "csv"):
         raise HTTPException(status_code=404, detail="Unknown export entity")
     await require_permission(request, perm_map[entity])
     from fastapi.responses import StreamingResponse
-    header, rows = await _export_dataset(entity)
+    user = await get_current_user(request)
+    header, rows = await _export_dataset(entity, user)
     if format == "xlsx":
         import openpyxl, io
         wb = openpyxl.Workbook(); ws = wb.active; ws.title = entity[:31]
