@@ -2017,6 +2017,59 @@ async def ops_refund_order(order_id: str, request: Request):
     return {"message": "Order refunded", "status": "refunded"}
 
 
+class TestOrderBody(BaseModel):
+    vendor_id: Optional[str] = None
+
+
+@api.post("/ops/orders/test")
+async def ops_create_test_order(body: TestOrderBody, request: Request):
+    """Admin-only helper: insert a PAID/reserved order with a real pickup code so
+    vendor pickup verification can be tested without going through Razorpay."""
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    vendor = None
+    if body.vendor_id:
+        vendor = await db.vendors.find_one({"vendor_id": body.vendor_id}, {"_id": 0})
+    if not vendor:
+        vendor = await db.vendors.find_one({"status": "active"}, {"_id": 0}) or await db.vendors.find_one({}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="No vendor found. Create a vendor first.")
+    item = await db.menu_items.find_one({"vendor_id": vendor["vendor_id"]}, {"_id": 0})
+    now = datetime.now(timezone.utc)
+    code = await _gen_pickup_code()
+    order_id = gen_id("order")
+    price = (item or {}).get("original_price") or 100
+    order_doc = {
+        "order_id": order_id,
+        "user_id": user["user_id"],
+        "user_name": "Test Customer (Ops)",
+        "food_item_id": (item or {}).get("menu_item_id", "test_item"),
+        "food_item_name": (item or {}).get("name", "Test Item"),
+        "vendor_id": vendor["vendor_id"],
+        "vendor_name": vendor.get("name", ""),
+        "quantity": 1,
+        "order_type": "takeaway",
+        "discounted_price": price,
+        "item_subtotal": price,
+        "total_amount": round(price * 1.05, 2),
+        "status": "reserved",
+        "pickup_code": code,
+        "pickup_verified": False,
+        "pickup_verified_at": None,
+        "pickup_verified_by": None,
+        "payment_confirmed_at": now,
+        "pickup_start_time": vendor.get("pickup_start_time", "18:00"),
+        "pickup_end_time": vendor.get("pickup_end_time", "21:00"),
+        "razorpay_order_id": f"test_{order_id}",
+        "razorpay_payment_id": f"test_pay_{order_id}",
+        "is_test": True,
+        "created_at": now,
+    }
+    await db.orders.insert_one(order_doc)
+    return {"order_id": order_id, "pickup_code": code, "vendor_name": vendor.get("name", ""), "vendor_id": vendor["vendor_id"]}
+
+
 @api.get("/ops/users")
 async def ops_list_users(request: Request, search: Optional[str] = None, page: int = 1, page_size: int = 25):
     await require_permission(request, "view_users")
