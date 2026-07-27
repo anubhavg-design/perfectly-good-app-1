@@ -12,7 +12,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "in.perfectlygood.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Find surplus food deals near you"
+        "NSLocationWhenInUseUsageDescription": "Find surplus food deals near you",
+        "NSCameraUsageDescription": "Take a photo to report a wrong item"
       }
     },
     "android": {
@@ -24,7 +25,8 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA"
       ],
       "package": "in.perfectlygood.android"
     },

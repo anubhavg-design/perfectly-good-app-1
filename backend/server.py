@@ -21,6 +21,10 @@ from pydantic import BaseModel
 import math
 import re
 import requests as http_requests
+import asyncio
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 # ── Config ──────────────────────────────────────────────────────────────
 MONGO_URL = os.environ["MONGO_URL"]
@@ -964,8 +968,175 @@ async def cancel_user_order(order_id: str, request: Request):
     return {"message": "Order cancelled"}
 
 # ══════════════════════════════════════════════════════════════════════════
-#  VENDOR
+#  HELP & SUPPORT
 # ══════════════════════════════════════════════════════════════════════════
+
+# Issue types config — add new entries here; the app renders from this too.
+SUPPORT_ISSUE_TYPES = {
+    "refund", "order_cancelled", "restaurant_closed", "wrong_item",
+    "payment_issue", "pickup_expired", "app_bug", "other",
+}
+SUPPORT_ISSUE_LABELS = {
+    "refund": "Refund", "order_cancelled": "Order Cancelled", "restaurant_closed": "Restaurant Closed",
+    "wrong_item": "Wrong Item Received", "payment_issue": "Payment Issue", "pickup_expired": "Pickup Expired",
+    "app_bug": "App Bug", "other": "Other",
+}
+
+
+def _smtp_configured() -> bool:
+    host = os.environ.get("SMTP_HOST", "")
+    user = os.environ.get("SMTP_USER", "")
+    pwd = os.environ.get("SMTP_PASSWORD", "")
+    # Treat placeholder values as "not configured"
+    if not host or not user or not pwd:
+        return False
+    if "your-" in user.lower() or "your-" in pwd.lower() or "placeholder" in pwd.lower():
+        return False
+    return True
+
+
+def _send_email_sync(subject: str, html_body: str, text_body: str) -> bool:
+    if not _smtp_configured():
+        logger.info(f"[support-email] SMTP not configured — skipping send. Subject: {subject}")
+        return False
+    host = os.environ["SMTP_HOST"]
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    user = os.environ["SMTP_USER"]
+    pwd = os.environ["SMTP_PASSWORD"]
+    sender = os.environ.get("SUPPORT_EMAIL_FROM", user)
+    to_addr = os.environ.get("SUPPORT_EMAIL_TO", "anubhavg@perfectlygood.in")
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = to_addr
+    msg.attach(MIMEText(text_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+    try:
+        with smtplib.SMTP(host, port, timeout=20) as server:
+            server.starttls()
+            server.login(user, pwd)
+            server.sendmail(sender, [to_addr], msg.as_string())
+        logger.info(f"[support-email] Sent to {to_addr}: {subject}")
+        return True
+    except Exception as e:
+        logger.error(f"[support-email] Failed to send: {e}")
+        return False
+
+
+async def _send_support_email(subject: str, html_body: str, text_body: str) -> bool:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _send_email_sync, subject, html_body, text_body)
+
+
+async def _recent_order_today(user_id: str) -> Optional[dict]:
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return await db.orders.find_one(
+        {"user_id": user_id, "created_at": {"$gte": start}},
+        {"_id": 0}, sort=[("created_at", -1)],
+    )
+
+
+@api.get("/support/context")
+async def support_context(request: Request):
+    """Auto-populate fields from the customer's most recent order placed today."""
+    user = await get_current_user(request)
+    order = await _recent_order_today(user["user_id"])
+    ctx = {
+        "customer_name": user.get("name", ""),
+        "phone": user.get("phone", ""),
+        "order_id": None, "restaurant_name": None, "order_amount": None,
+        "pickup_datetime": None, "has_order": False,
+    }
+    if order:
+        pickup = ""
+        if order.get("pickup_start_time") or order.get("pickup_end_time"):
+            pickup = f"{order.get('pickup_start_time','')} - {order.get('pickup_end_time','')}".strip(" -")
+        created = order.get("created_at")
+        date_str = created.strftime("%d %b %Y") if hasattr(created, "strftime") else ""
+        ctx.update({
+            "order_id": order.get("order_id"),
+            "restaurant_name": order.get("vendor_name", ""),
+            "order_amount": order.get("total_amount", 0),
+            "pickup_datetime": f"{date_str}  {pickup}".strip(),
+            "has_order": True,
+        })
+    return ctx
+
+
+class SupportRequestBody(BaseModel):
+    issue_type: str
+    message: Optional[str] = ""
+    photo_base64: Optional[str] = None
+    device_model: Optional[str] = None
+    app_version: Optional[str] = None
+    what_happened: Optional[str] = None
+
+
+@api.post("/support/requests")
+async def create_support_request(body: SupportRequestBody, request: Request):
+    user = await get_current_user(request)
+    if body.issue_type not in SUPPORT_ISSUE_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid issue type")
+    if body.issue_type == "wrong_item" and not (body.photo_base64 or "").strip():
+        raise HTTPException(status_code=400, detail="A photo is required for a wrong item report.")
+
+    order = await _recent_order_today(user["user_id"])
+    order_snapshot = {}
+    if order:
+        order_snapshot = {
+            "order_id": order.get("order_id"),
+            "restaurant_name": order.get("vendor_name", ""),
+            "order_amount": order.get("total_amount", 0),
+            "pickup_start_time": order.get("pickup_start_time", ""),
+            "pickup_end_time": order.get("pickup_end_time", ""),
+        }
+
+    req_id = gen_id("support")
+    now = datetime.now(timezone.utc)
+    doc = {
+        "support_id": req_id,
+        "user_id": user["user_id"],
+        "customer_name": user.get("name", ""),
+        "phone": user.get("phone", ""),
+        "email": user.get("email", ""),
+        "issue_type": body.issue_type,
+        "issue_label": SUPPORT_ISSUE_LABELS.get(body.issue_type, body.issue_type),
+        "message": (body.message or "").strip(),
+        "photo_base64": body.photo_base64 if body.issue_type == "wrong_item" else None,
+        "device_model": body.device_model if body.issue_type == "app_bug" else None,
+        "app_version": body.app_version if body.issue_type == "app_bug" else None,
+        "what_happened": body.what_happened if body.issue_type == "app_bug" else None,
+        "order": order_snapshot,
+        "status": "open",
+        "created_at": now,
+    }
+    await db.support_requests.insert_one(doc)
+
+    # Build + send email notification (non-blocking; best-effort)
+    label = doc["issue_label"]
+    rows = [
+        ("Issue", label), ("Customer", doc["customer_name"]), ("Phone", doc["phone"]),
+        ("Email", doc["email"]), ("Order ID", order_snapshot.get("order_id", "—")),
+        ("Restaurant", order_snapshot.get("restaurant_name", "—")),
+        ("Order Amount", f"₹{order_snapshot.get('order_amount', '—')}"),
+        ("Pickup", f"{order_snapshot.get('pickup_start_time','')} - {order_snapshot.get('pickup_end_time','')}"),
+        ("Message", doc["message"] or "—"),
+    ]
+    if body.issue_type == "app_bug":
+        rows += [("Device", doc["device_model"] or "—"), ("App Version", doc["app_version"] or "—"),
+                 ("What happened", doc["what_happened"] or "—")]
+    if body.issue_type == "wrong_item":
+        rows += [("Photo", "Attached (stored in dashboard)")]
+    html = "<h2>New Support Request</h2><table style='border-collapse:collapse'>" + "".join(
+        f"<tr><td style='padding:4px 12px;font-weight:bold'>{k}</td><td style='padding:4px 12px'>{v}</td></tr>" for k, v in rows
+    ) + f"</table><p style='color:#888'>Request ID: {req_id}</p>"
+    text = "New Support Request\n" + "\n".join(f"{k}: {v}" for k, v in rows) + f"\nRequest ID: {req_id}"
+    email_sent = await _send_support_email(f"[Support] {label} — {doc['customer_name']}", html, text)
+
+    return {"support_id": req_id, "message": "Support request submitted", "email_sent": email_sent}
+
+
 
 class CreateDropBody(BaseModel):
     menu_item_id: str

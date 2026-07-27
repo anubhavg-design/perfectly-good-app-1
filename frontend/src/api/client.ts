@@ -146,6 +146,15 @@ export const authApi = {
     apiFetch('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, new_password }), skipAuth: true }),
 };
 
+// Help & Support endpoints
+export const supportApi = {
+  context: () => apiFetch('/support/context'),
+  submit: (data: {
+    issue_type: string; message?: string; photo_base64?: string | null;
+    device_model?: string; app_version?: string; what_happened?: string;
+  }) => apiFetch('/support/requests', { method: 'POST', body: JSON.stringify(data) }),
+};
+
 // Drops endpoints
 export const dropsApi = {
   list: (params: { lat?: number; lon?: number; search?: string; category?: string; max_price?: number; sort_by?: string }) => {

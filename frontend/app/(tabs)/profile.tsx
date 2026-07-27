@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText } from 'lucide-react-native';
+import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 
@@ -109,6 +109,22 @@ export default function ProfileScreen() {
               </View>
             </View>
           )}
+
+          <TouchableOpacity
+            testID="help-support-btn"
+            style={styles.actionCard}
+            onPress={() => router.push('/support')}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#EFF6FF' }]}>
+              <LifeBuoy size={20} color="#2563EB" />
+            </View>
+            <View style={styles.actionContent}>
+              <Text style={styles.actionTitle}>Help & Support</Text>
+              <Text style={styles.actionSubtitle}>Report an issue with your order</Text>
+            </View>
+            <ChevronRight size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
 
           <TouchableOpacity
             testID="privacy-policy-btn"

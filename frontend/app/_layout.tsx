@@ -57,6 +57,8 @@ export default function RootLayout() {
         <Stack.Screen name="vendor-create-drop" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="forgot-password" />
         <Stack.Screen name="privacy-policy" />
+        <Stack.Screen name="support/index" />
+        <Stack.Screen name="support/[type]" />
       </Stack>
     </AuthProvider>
   );
