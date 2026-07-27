@@ -118,7 +118,7 @@ export default function CheckoutScreen() {
         setShowRazorpay(false);
         setLoading(true);
         try {
-          await ordersApi.verify({
+          const res = await ordersApi.verify({
             razorpay_order_id: data.razorpay_order_id,
             razorpay_payment_id: data.razorpay_payment_id,
             razorpay_signature: data.razorpay_signature,
@@ -126,9 +126,19 @@ export default function CheckoutScreen() {
             quantity,
             order_type: orderType,
           });
-          Alert.alert('Reserved!', 'Your food has been reserved. Check My Orders for details.', [
-            { text: 'View Orders', onPress: () => router.replace('/(tabs)/orders') },
-          ]);
+          const o = res?.order || {};
+          router.replace({
+            pathname: '/order-confirmation',
+            params: {
+              orderId: o.order_id || res?.order_id || '',
+              code: o.pickup_code || '',
+              vendorName: o.vendor_name || params.vendorName || '',
+              itemName: o.food_item_name || params.name || '',
+              pickupStart: o.pickup_start_time || '',
+              pickupEnd: o.pickup_end_time || '',
+              orderType: o.order_type || orderType,
+            },
+          });
         } catch (err: any) {
           Alert.alert('Verification Failed', err.message);
         } finally {

@@ -206,6 +206,9 @@ export const vendorApi = {
   updateOrderStatus: (orderId: string, status: string) =>
     apiFetch(`/vendor/orders/${orderId}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
 
+  verifyPickup: (orderId: string, code: string) =>
+    apiFetch(`/vendor/orders/${orderId}/verify-pickup`, { method: 'PUT', body: JSON.stringify({ code }) }),
+
   menu: () => apiFetch('/vendor/menu'),
 
   toggleMenuItem: (id: string, in_stock: boolean) =>

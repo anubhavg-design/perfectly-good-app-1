@@ -707,6 +707,16 @@ async def create_order(body: CreateOrderBody, request: Request):
         "amount": amount_paise,
     }
 
+async def _gen_pickup_code() -> str:
+    """Unique 6-digit numeric pickup code, never reused across orders."""
+    for _ in range(25):
+        code = f"{secrets.randbelow(900000) + 100000}"
+        if not await db.orders.find_one({"pickup_code": code}, {"_id": 1}):
+            return code
+    # Extremely unlikely fallback
+    return f"{secrets.randbelow(900000) + 100000}"
+
+
 async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optional[str]:
     """Create the confirmed order from a pending order. Idempotent: if an order
     for this razorpay_order_id already exists, it is returned without duplication.
@@ -729,6 +739,8 @@ async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optio
     order_type = pending.get("order_type", "surplus")
     quantity = pending.get("quantity", 1)
     unit_price = pending.get("unit_price", item.get("discounted_price", 0))
+    now = datetime.now(timezone.utc)
+    pickup_code = await _gen_pickup_code()
     order_doc = {
         "order_id": order_id,
         "user_id": pending.get("user_id"),
@@ -743,11 +755,16 @@ async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optio
         "item_subtotal": pending.get("item_subtotal", round(unit_price * quantity, 2)),
         "total_amount": pending.get("total_amount", 0),
         "status": "reserved",
+        "pickup_code": pickup_code,
+        "pickup_verified": False,
+        "pickup_verified_at": None,
+        "pickup_verified_by": None,
+        "payment_confirmed_at": now,
         "pickup_start_time": vendor.get("pickup_start_time", "") if vendor else "",
         "pickup_end_time": vendor.get("pickup_end_time", "") if vendor else "",
         "razorpay_order_id": rzp_order_id,
         "razorpay_payment_id": razorpay_payment_id,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": now,
     }
     await db.orders.insert_one(order_doc)
 
@@ -773,12 +790,21 @@ async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optio
 @api.post("/orders/verify")
 async def verify_order(body: VerifyOrderBody, request: Request):
     user = await get_current_user(request)
+
+    async def _order_out(oid: str) -> dict:
+        o = await db.orders.find_one({"order_id": oid}, {"_id": 0})
+        if o and isinstance(o.get("created_at"), datetime):
+            o["created_at"] = o["created_at"].isoformat()
+        if o and isinstance(o.get("payment_confirmed_at"), datetime):
+            o["payment_confirmed_at"] = o["payment_confirmed_at"].isoformat()
+        return o or {}
+
     pending = await db.pending_orders.find_one({"razorpay_order_id": body.razorpay_order_id}, {"_id": 0})
     if not pending:
         # Webhook may have already finalized this order
         existing = await db.orders.find_one({"razorpay_order_id": body.razorpay_order_id}, {"_id": 0})
         if existing:
-            return {"message": "Order confirmed", "order_id": existing.get("order_id")}
+            return {"message": "Order confirmed", "order_id": existing.get("order_id"), "order": await _order_out(existing.get("order_id"))}
         raise HTTPException(status_code=400, detail="Order not found")
 
     # Verify the Razorpay payment signature (HMAC SHA256 of order_id|payment_id)
@@ -797,14 +823,14 @@ async def verify_order(body: VerifyOrderBody, request: Request):
     order_id = await _finalize_order(pending, body.razorpay_payment_id)
     if not order_id:
         raise HTTPException(status_code=404, detail="Item not found")
-    return {"message": "Order confirmed", "order_id": order_id}
+    return {"message": "Order confirmed", "order_id": order_id, "order": await _order_out(order_id)}
 
 
 @api.post("/webhooks/razorpay")
 async def razorpay_webhook(request: Request):
     """Server-to-server confirmation from Razorpay. Reliably finalizes an order
     even if the app is closed before /orders/verify runs. Configure this URL and
-    a secret in the Razorpay Dashboard (events: payment.captured, order.paid, payment.failed)."""
+    a secret in the Razorpay Dashboard (events: payment.captured, order.paid, payment.failed, refund.processed)."""
     raw = await request.body()
     signature = request.headers.get("X-Razorpay-Signature", "")
     webhook_secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
@@ -847,6 +873,27 @@ async def razorpay_webhook(request: Request):
             await db.pending_orders.delete_one({"razorpay_order_id": rzp_order_id})
         logger.info(f"Webhook: payment.failed for {rzp_order_id} ({entity.get('error_description', 'no detail')})")
         return {"status": "failed_logged"}
+
+    # Handle refunds: mark the matching order refunded and invalidate its pickup code.
+    if event in ("refund.created", "refund.processed", "refund.speed_changed"):
+        try:
+            refund_entity = payload["payload"]["refund"]["entity"]
+        except Exception:
+            refund_entity = {}
+        payment_id = refund_entity.get("payment_id", "")
+        if payment_id:
+            order = await db.orders.find_one({"razorpay_payment_id": payment_id}, {"_id": 0})
+            if order and order.get("status") != "refunded":
+                await db.orders.update_one({"order_id": order["order_id"]}, {"$set": {
+                    "status": "refunded",
+                    "pickup_code": None,
+                    "pickup_verified": False,
+                    "refunded_at": datetime.now(timezone.utc),
+                    "refunded_by": "Razorpay (webhook)",
+                }})
+                logger.info(f"Webhook: order {order['order_id']} marked refunded ({event})")
+                return {"status": "refunded", "order_id": order["order_id"]}
+        return {"status": "refund_ignored"}
 
     # Extract the order id + payment id from either payment or order entity
     rzp_order_id = ""
@@ -1109,20 +1156,62 @@ async def vendor_orders(request: Request):
     orders = await db.orders.find({"vendor_id": vendor["vendor_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
     for o in orders:
         o["customer_name"] = o.get("user_name", "Customer")
+        # Never expose the pickup code to the vendor — they must ask the customer to show it.
+        o.pop("pickup_code", None)
         if "created_at" in o and hasattr(o["created_at"], "isoformat"):
             o["created_at"] = o["created_at"].isoformat()
     return orders
+
+
+class VerifyPickupBody(BaseModel):
+    code: str
+
+
+@api.put("/vendor/orders/{order_id}/verify-pickup")
+async def verify_pickup(order_id: str, body: VerifyPickupBody, request: Request):
+    """Vendor verifies the customer's pickup code to complete the order.
+    Completion only happens on a correct code; idempotent & race-safe."""
+    user = await get_current_user(request)
+    if user["role"] not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    order = await db.orders.find_one({"order_id": order_id, "vendor_id": vendor["vendor_id"]}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("status") == "picked_up":
+        raise HTTPException(status_code=400, detail="This order has already been completed.")
+    if order.get("status") in ("cancelled", "refunded", "expired"):
+        raise HTTPException(status_code=400, detail="This order can no longer be verified.")
+
+    code = (body.code or "").strip()
+    now = datetime.now(timezone.utc)
+    # Atomic: only a reserved order with the matching code is completed — prevents
+    # duplicate verification and wrong-code completion in one shot.
+    result = await db.orders.update_one(
+        {"order_id": order_id, "vendor_id": vendor["vendor_id"], "status": "reserved", "pickup_code": code},
+        {"$set": {
+            "status": "picked_up",
+            "pickup_verified": True,
+            "pickup_verified_at": now,
+            "pickup_verified_by": user.get("name") or user.get("email") or "Vendor",
+        }},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="Incorrect pickup code. Please ask the customer to show the correct code.")
+    return {"message": "Pickup verified", "status": "picked_up", "order_id": order_id}
 
 @api.put("/vendor/orders/{order_id}/status")
 async def update_vendor_order_status(order_id: str, body: UpdateOrderStatusBody, request: Request):
     user = await get_current_user(request)
     if user["role"] not in ("vendor", "admin"):
         raise HTTPException(status_code=403, detail="Not a vendor")
-    if body.status not in ("picked_up", "cancelled"):
-        raise HTTPException(status_code=400, detail="Invalid status")
-    result = await db.orders.update_one({"order_id": order_id}, {"$set": {"status": body.status}})
+    if body.status != "cancelled":
+        raise HTTPException(status_code=400, detail="Orders are completed via pickup code verification.")
+    result = await db.orders.update_one({"order_id": order_id, "status": {"$nin": ["picked_up", "refunded"]}}, {"$set": {"status": body.status}})
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Order not found or cannot be cancelled")
     return {"message": "Status updated", "status": body.status}
 
 # ── Vendor Payouts ──────────────────────────────────────────────────────
@@ -1512,11 +1601,11 @@ async def ops_dashboard_stats(request: Request):
     pending_vendors = await db.vendors.count_documents({"status": "pending"})
     live_items = await db.menu_items.count_documents({"available_today": True})
 
-    orders_today = await db.orders.count_documents({"created_at": {"$gte": day0}, "status": {"$ne": "cancelled"}})
-    orders_week = await db.orders.count_documents({"created_at": {"$gte": week0}, "status": {"$ne": "cancelled"}})
+    orders_today = await db.orders.count_documents({"created_at": {"$gte": day0}, "status": {"$nin": ["cancelled", "refunded"]}})
+    orders_week = await db.orders.count_documents({"created_at": {"$gte": week0}, "status": {"$nin": ["cancelled", "refunded"]}})
 
-    today_orders = await db.orders.find({"created_at": {"$gte": day0}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(100000)
-    month_orders = await db.orders.find({"created_at": {"$gte": month0}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(100000)
+    today_orders = await db.orders.find({"created_at": {"$gte": day0}, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(100000)
+    month_orders = await db.orders.find({"created_at": {"$gte": month0}, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(100000)
     revenue_today = round(sum(order_revenue(o) for o in today_orders), 2)
     revenue_month = round(sum(order_revenue(o) for o in month_orders), 2)
 
@@ -1560,7 +1649,7 @@ async def _vendor_aggregates(vendor_ids: list) -> dict:
     for m in menu:
         if m["vendor_id"] in agg:
             agg[m["vendor_id"]]["menu_count"] += 1
-    orders = await db.orders.find({"vendor_id": {"$in": vendor_ids}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(100000)
+    orders = await db.orders.find({"vendor_id": {"$in": vendor_ids}, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(100000)
     for o in orders:
         vid = o.get("vendor_id")
         if vid in agg:
@@ -1681,7 +1770,7 @@ async def ops_vendor_detail(vendor_id: str, request: Request):
         if isinstance(v.get(k), datetime):
             v[k] = v[k].isoformat()
     v["menu_items"] = menu
-    v["total_orders"] = len([o for o in orders if o.get("status") != "cancelled"])
+    v["total_orders"] = len([o for o in orders if o.get("status") not in ("cancelled", "refunded")])
     v["completed_orders"] = len(completed)
     v["revenue"] = revenue
     v["commission"] = commission
@@ -1862,7 +1951,7 @@ async def ops_toggle_availability(menu_item_id: str, body: AvailabilityBody, req
 @api.get("/ops/orders")
 async def ops_list_orders(request: Request, range: Optional[str] = None, vendor_id: Optional[str] = None,
                           status: Optional[str] = None, page: int = 1, page_size: int = 25):
-    await require_permission(request, "view_orders")
+    me = await require_permission(request, "view_orders")
     cfg = await get_settings_doc()
     query: dict = {}
     now = datetime.now(timezone.utc)
@@ -1881,6 +1970,9 @@ async def ops_list_orders(request: Request, range: Optional[str] = None, vendor_
         o["commission"] = round(order_revenue(o) * cfg["commission_rate"], 2)
         o["order_value"] = o.get("total_amount", 0)
         o["customer_name"] = o.get("user_name", "Customer")
+        # Pickup codes are only exposed to admins in the ops list.
+        if me.get("role") != "admin":
+            o.pop("pickup_code", None)
         if isinstance(o.get("created_at"), datetime):
             o["created_at"] = o["created_at"].isoformat()
     return {"items": orders, "total": total, "page": page, "page_size": page_size}
@@ -1890,12 +1982,39 @@ async def ops_list_orders(request: Request, range: Optional[str] = None, vendor_
 async def ops_update_order_status(order_id: str, body: dict, request: Request):
     await require_permission(request, "update_order_status")
     status = body.get("status")
-    if status not in ("reserved", "picked_up", "cancelled", "expired"):
+    if status not in ("reserved", "picked_up", "cancelled", "expired", "refunded"):
         raise HTTPException(status_code=400, detail="Invalid status")
     result = await db.orders.update_one({"order_id": order_id}, {"$set": {"status": status}})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Order not found")
     return {"message": "Status updated", "status": status}
+
+
+@api.post("/ops/orders/{order_id}/refund")
+async def ops_refund_order(order_id: str, request: Request):
+    """Mark an order refunded and invalidate its pickup code so it can no longer
+    be verified. Does not trigger a money refund in Razorpay (do that from the
+    Razorpay dashboard; the refund webhook will also mark orders refunded)."""
+    user = await require_permission(request, "manage_payouts")
+    order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("status") == "refunded":
+        return {"message": "Order already refunded", "status": "refunded"}
+    await db.orders.update_one({"order_id": order_id}, {"$set": {
+        "status": "refunded",
+        "pickup_code": None,
+        "pickup_verified": False,
+        "refunded_at": datetime.now(timezone.utc),
+        "refunded_by": user.get("name") or user.get("email") or "Staff",
+    }})
+    # Restore surplus quantity if it was decremented and not yet picked up.
+    if order.get("order_type") == "surplus" and order.get("status") == "reserved" and order.get("quantity"):
+        await db.menu_items.update_one(
+            {"menu_item_id": order.get("food_item_id"), "quantity_available": {"$ne": None}},
+            {"$inc": {"quantity_available": order.get("quantity", 0)}},
+        )
+    return {"message": "Order refunded", "status": "refunded"}
 
 
 @api.get("/ops/users")
@@ -1913,7 +2032,7 @@ async def ops_list_users(request: Request, search: Optional[str] = None, page: i
     users = await db.users.find(query, {"_id": 0, "password_hash": 0}).sort("created_at", -1).skip(skip).limit(page_size).to_list(page_size)
     # aggregate orders + money saved
     uids = [u["user_id"] for u in users]
-    orders = await db.orders.find({"user_id": {"$in": uids}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(100000)
+    orders = await db.orders.find({"user_id": {"$in": uids}, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(100000)
     items = await db.menu_items.find({}, {"_id": 0, "menu_item_id": 1, "original_price": 1}).to_list(100000)
     orig_map = {i["menu_item_id"]: i.get("original_price", 0) for i in items}
     by_user: dict = {}
@@ -2342,7 +2461,7 @@ async def _export_dataset(entity: str, user: Optional[dict] = None):
     if entity == "customers":
         users = await db.users.find({"role": "user"}, {"_id": 0, "password_hash": 0}).to_list(100000)
         uids = [u["user_id"] for u in users]
-        orders = await db.orders.find({"user_id": {"$in": uids}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(200000)
+        orders = await db.orders.find({"user_id": {"$in": uids}, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(200000)
         items = await db.menu_items.find({}, {"_id": 0, "menu_item_id": 1, "original_price": 1}).to_list(200000)
         orig = {i["menu_item_id"]: i.get("original_price", 0) for i in items}
         from collections import defaultdict
@@ -2414,7 +2533,7 @@ async def ops_analytics(request: Request, days: int = 30):
     days = max(7, min(days, 90))
     start = _day_start(now) - timedelta(days=days - 1)
 
-    window_orders = await db.orders.find({"created_at": {"$gte": start}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(200000)
+    window_orders = await db.orders.find({"created_at": {"$gte": start}, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(200000)
     rev_day, ord_day = defaultdict(float), defaultdict(int)
     for o in window_orders:
         key = _as_dt(o.get("created_at")).strftime("%Y-%m-%d")
@@ -2480,7 +2599,7 @@ async def ops_vendor_performance(vendor_id: str, request: Request):
     week0 = _day_start(now) - timedelta(days=7)
     month0 = _month_start(now)
     orders = await db.orders.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(100000)
-    valid = [o for o in orders if o.get("status") != "cancelled"]
+    valid = [o for o in orders if o.get("status") not in ("cancelled", "refunded")]
     completed = [o for o in orders if o.get("status") == "picked_up"]
     revenue = round(sum(order_revenue(o) for o in completed), 2)
     menu = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(2000)

@@ -1,18 +1,19 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  ActivityIndicator, RefreshControl, Alert,
+  ActivityIndicator, RefreshControl, Alert, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
-import { ShoppingBag, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react-native';
+import { ShoppingBag, Clock, CheckCircle, XCircle, AlertCircle, RotateCcw, KeyRound, LifeBuoy } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { ordersApi } from '../../src/api/client';
 
 const STATUS_CONFIG: Record<string, { color: string; icon: any; label: string }> = {
-  reserved: { color: COLORS.primary, icon: Clock, label: 'Reserved' },
-  picked_up: { color: COLORS.info, icon: CheckCircle, label: 'Picked Up' },
+  reserved: { color: COLORS.primary, icon: Clock, label: 'Ready for Pickup' },
+  picked_up: { color: COLORS.info, icon: CheckCircle, label: 'Completed' },
   cancelled: { color: COLORS.error, icon: XCircle, label: 'Cancelled' },
+  refunded: { color: COLORS.accentUrgent, icon: RotateCcw, label: 'Refunded' },
   expired: { color: COLORS.textMuted, icon: AlertCircle, label: 'Expired' },
 };
 
@@ -24,6 +25,7 @@ interface Order {
   total_amount: number;
   status: string;
   order_type?: string;
+  pickup_code?: string;
   pickup_start_time: string;
   pickup_end_time: string;
   created_at: string;
@@ -124,16 +126,38 @@ export default function OrdersScreen() {
           <Text style={styles.totalAmount}>₹{item.total_amount}</Text>
         </View>
 
+        {isReserved && item.pickup_code ? (
+          <View style={styles.codeBox}>
+            <View style={styles.codeBoxHeader}>
+              <KeyRound size={14} color={COLORS.primary} />
+              <Text style={styles.codeBoxLabel}>Your Pickup Code</Text>
+            </View>
+            <Text testID={`pickup-code-${item.order_id}`} style={styles.codeBoxValue}>{item.pickup_code}</Text>
+            <Text style={styles.codeBoxHint}>Show this code to the restaurant during pickup.</Text>
+          </View>
+        ) : null}
+
         {isReserved && (
-          <TouchableOpacity
-            testID={`cancel-order-${item.order_id}`}
-            style={styles.cancelBtn}
-            onPress={() => handleCancel(item.order_id, item.food_item_name)}
-            activeOpacity={0.7}
-          >
-            <XCircle size={15} color={COLORS.error} />
-            <Text style={styles.cancelBtnText}>Cancel Reservation</Text>
-          </TouchableOpacity>
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              testID={`support-order-${item.order_id}`}
+              style={styles.supportBtn}
+              onPress={() => Linking.openURL(`mailto:support@perfectlygood.in?subject=Order%20${item.order_id}`)}
+              activeOpacity={0.7}
+            >
+              <LifeBuoy size={15} color={COLORS.textSecondary} />
+              <Text style={styles.supportBtnText}>Support</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID={`cancel-order-${item.order_id}`}
+              style={styles.cancelBtn}
+              onPress={() => handleCancel(item.order_id, item.food_item_name)}
+              activeOpacity={0.7}
+            >
+              <XCircle size={15} color={COLORS.error} />
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
     );
@@ -206,10 +230,20 @@ const styles = StyleSheet.create({
   totalAmount: { fontSize: 18, fontFamily: 'Outfit_700Bold', color: COLORS.primary, marginLeft: 'auto' },
   cancelBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    marginTop: SPACING.sm, paddingVertical: SPACING.sm,
-    borderTopWidth: 1, borderTopColor: COLORS.borderLight,
+    flex: 1, paddingVertical: SPACING.sm,
   },
   cancelBtnText: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.error },
+  actionRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginTop: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.borderLight, paddingTop: SPACING.xs },
+  supportBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, flex: 1, paddingVertical: SPACING.sm },
+  supportBtnText: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  codeBox: {
+    marginTop: SPACING.sm, backgroundColor: COLORS.primary + '0D', borderWidth: 1, borderColor: COLORS.primary + '33',
+    borderRadius: RADIUS.md, padding: SPACING.md, alignItems: 'center',
+  },
+  codeBoxHeader: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  codeBoxLabel: { fontSize: 12, fontFamily: 'DMSans_700Bold', color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 0.8 },
+  codeBoxValue: { fontSize: 34, fontFamily: 'Outfit_700Bold', color: COLORS.primary, letterSpacing: 6, marginVertical: 2 },
+  codeBoxHint: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, textAlign: 'center' },
   emptyState: { alignItems: 'center', paddingTop: 100 },
   emptyTitle: { fontSize: 20, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginTop: SPACING.md },
   emptySubtitle: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: SPACING.xs },

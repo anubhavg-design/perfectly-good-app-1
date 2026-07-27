@@ -108,6 +108,7 @@ export const opsApi = {
 
   listOrders: (p?: any) => apiFetch(`/ops/orders${qs(p)}`),
   orderStatus: (id: string, status: string) => apiFetch(`/ops/orders/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  refundOrder: (id: string) => apiFetch(`/ops/orders/${id}/refund`, { method: 'POST' }),
 
   listUsers: (p?: any) => apiFetch(`/ops/users${qs(p)}`),
 

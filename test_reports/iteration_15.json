@@ -1,0 +1,34 @@
+{
+  "summary": "Secure Pickup Verification (Jan-2026) feature verified end-to-end on backend + all 3 frontends (customer, vendor, ops). Backend: 12/12 pytest tests pass in new file test_pickup_verification.py — PUT /api/vendor/orders/{id}/verify-pickup returns 400 'Incorrect pickup code...' for wrong code, 200 status=picked_up + persisted pickup_verified=True for correct code, 400 'already been completed' on replay, 400 'no longer be verified' on a cancelled/refunded order; GET /api/vendor/orders never contains the pickup_code field (explicit .pop()); GET /api/ops/orders exposes pickup_code ONLY for admin (anubhavg@perfectlygood.in role=admin) and drops it for role=operations (operations@perfectlygood.in has no manage_payouts either); POST /api/ops/orders/{id}/refund → 403 for operations (missing manage_payouts) and 200 + status=refunded + pickup_code=null for admin; a subsequent verify-pickup on the refunded order correctly returns 400; GET /api/ops/dashboard/stats and /api/ops/analytics still respond 200 (no regression, refunded is excluded from revenue like cancelled per code review at server.py:1604-1652 & 2036+). Frontend customer (mobile web 390x844): logged in as freshly registered TEST customer with a seeded reserved order — My Orders shows a prominent 'YOUR PICKUP CODE 246810' card, 'Ready for Pickup' status pill, and Support + Cancel buttons; the code card is only rendered while status=='reserved'. Frontend vendor (mobile web 390x844, vendor@demo.com → dv_namma): Dashboard→Orders tab shows the four filter chips 'Ready for Pickup / Completed / Cancelled / Refunded' with counts; the seeded reserved order shows a green 'Verify Pickup' button + red Cancel button and NEVER shows the pickup code; the numeric-only modal (keyboardType=number-pad, maxLength=6) rejects '999999' (order stays reserved) and accepts '246810' → order moves to the Completed filter with a COMPLETED badge. Frontend ops (web 1280x900, admin): /ops/orders shows a 'PICKUP CODE' column with the code '888999' visible only to admin, a 'Refund' button in the Actions column for every non-refunded/non-cancelled row, Status filter chips include 'Refunded'; clicking Refund opens the ConfirmDialog 'Refund this order?' with 'Mark Refunded' CTA; confirming calls POST /api/ops/orders/{id}/refund and the DB doc becomes {status:'refunded', pickup_code:null, refunded_by:'Anubhav'}. No red-screen errors, no deprecated Expo packages (already migrated in prior iterations), only the expected shadow*/pointerEvents deprecation warnings from RN-Web.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pickup_verification.py",
+    "/app/test_reports/pytest/pytest_iter15.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py::verify_pickup uses a single atomic update_one filtered by {status:'reserved', pickup_code:code} — this correctly prevents race conditions and wrong-code completions in one shot; the ordering also gives the intended 400 messages ('already completed' first, then 'no longer be verified', otherwise 'Incorrect pickup code').",
+    "server.py::vendor_orders explicitly does o.pop('pickup_code', None) on every row — pickup codes are never exposed to vendors. Verified in TestVendorListNoCode.",
+    "server.py::ops_list_orders correctly gates pickup_code visibility with `if me.get('role') != 'admin': o.pop('pickup_code', None)` — operations staff never see codes even if their permissions were broadened.",
+    "server.py::ops_refund_order gates on manage_payouts (require_permission) so operations gets 403 without breaking anything else; it nulls pickup_code, sets pickup_verified=False and stamps refunded_at/refunded_by. It correctly returns idempotent {message:'Order already refunded'} for the double-click case.",
+    "server.py::update_vendor_order_status now only allows body.status=='cancelled' — completion is only reachable via verify-pickup, matching the feature spec.",
+    "Analytics/dashboard queries consistently use {'status': {'$nin': ['cancelled', 'refunded']}} (lines 1604, 1605, 1607, 1608, 1652, 2035, 2464, 2536, 2602) so refunded orders are excluded from revenue/order-count metrics just like cancelled.",
+    "frontend/(tabs)/orders.tsx correctly gates the pickup-code card behind `isReserved && item.pickup_code` — completed/refunded orders will not render the code card even if the backend accidentally returned one.",
+    "frontend/(tabs)/dashboard.tsx uses onChangeText={(t) => setVerifyCode(t.replace(/[^0-9]/g, '').slice(0, 6))} + keyboardType='number-pad' + maxLength=6 — enforces 6-digit numeric on all platforms including web.",
+    "frontend/app/ops/orders.tsx correctly hides the Refund action for status in ('refunded','cancelled') and only renders it when hasPerm(user,'manage_payouts') — matches backend RBAC."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pickup_verification.py (new — 12 tests: 4 verify-pickup states, vendor-list-no-code, admin/ops pickup-code visibility, refund RBAC, refund→verify blocked, dashboard/analytics no-regress + refunded excluded)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (customer My Orders, vendor Dashboard→Orders + Verify Pickup modal happy/error, ops Orders + Refund confirm dialog — all verified)"},
+  "seed_data_creation": "Ephemeral: pytest creates one TEST_pickup_* customer per run (uniquely timestamped email) and seeds/cleans up its own reserved orders in each test via try/finally. UI run seeded 2 additional orders and deleted them post-run. No permanent seed changes.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "1) operations@perfectlygood.in / ops12345 is the operations account required for RBAC tests — it does NOT have manage_payouts (correct). 2) To create paid/reserved orders, insert directly into Mongo orders collection (LIVE Razorpay — never complete a real payment); minimal doc fields listed in test_pickup_verification._seed_reserved_order. 3) Ops dashboard endpoint is /api/ops/dashboard/stats (NOT /api/ops/dashboard). 4) requests.Session/headers only accept str values — DO NOT store non-string fields (like _user dict) in the auth-header dict. 5) The vendor Dashboard Orders tab uses filter chips whose labels contain counts like 'Ready for Pickup (1)' — matching text=... with exact=False works. 6) Ops /ops/orders 'Refund' text appears both as filter chip ('Refunded') and as action button ('Refund') — iterate query_selector_all('text=Refund') and match text=='Refund' exactly to click the row action, not the chip. 7) EXPO_PUBLIC_BACKEND_URL lives in /app/frontend/.env — load both /app/backend/.env AND /app/frontend/.env in test files."
+}

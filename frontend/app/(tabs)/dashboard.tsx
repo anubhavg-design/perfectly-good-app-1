@@ -5,13 +5,28 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X } from 'lucide-react-native';
+import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X, KeyRound } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import { vendorApi } from '../../src/api/client';
 
 type TabType = 'menu' | 'drops' | 'orders' | 'earnings' | 'settings';
+type OrderFilter = 'reserved' | 'picked_up' | 'cancelled' | 'refunded';
+
+const V_ORDER_STATUS: Record<string, { label: string; color: string }> = {
+  reserved: { label: 'Ready for Pickup', color: COLORS.primary },
+  picked_up: { label: 'Completed', color: COLORS.info },
+  cancelled: { label: 'Cancelled', color: COLORS.error },
+  refunded: { label: 'Refunded', color: COLORS.accentUrgent },
+  expired: { label: 'Expired', color: COLORS.textMuted },
+};
+const ORDER_FILTERS: { key: OrderFilter; label: string }[] = [
+  { key: 'reserved', label: 'Ready for Pickup' },
+  { key: 'picked_up', label: 'Completed' },
+  { key: 'cancelled', label: 'Cancelled' },
+  { key: 'refunded', label: 'Refunded' },
+];
 
 interface VendorDrop {
   item_id: string;
@@ -31,6 +46,8 @@ interface VendorOrder {
   quantity: number;
   total_amount: number;
   status: string;
+  pickup_start_time?: string;
+  pickup_end_time?: string;
   created_at: string;
 }
 
@@ -148,6 +165,31 @@ export default function DashboardScreen() {
   const [editProtein, setEditProtein] = useState('');
   const [savingItem, setSavingItem] = useState(false);
 
+  // Pickup verification (vendor)
+  const [orderFilter, setOrderFilter] = useState<OrderFilter>('reserved');
+  const [verifyOrder, setVerifyOrder] = useState<any>(null);
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
+
+  const submitVerify = async () => {
+    if (!verifyOrder) return;
+    if (verifyCode.trim().length !== 6) {
+      Alert.alert('Enter code', 'Please enter the customer\u2019s 6-digit pickup code.');
+      return;
+    }
+    setVerifying(true);
+    try {
+      await vendorApi.verifyPickup(verifyOrder.order_id, verifyCode.trim());
+      setOrders(prev => prev.map(o => o.order_id === verifyOrder.order_id ? { ...o, status: 'picked_up' } : o));
+      setVerifyOrder(null); setVerifyCode('');
+      Alert.alert('\u2705 Pickup Verified', 'Pickup verified successfully. The order is now completed.');
+    } catch (err: any) {
+      Alert.alert('Verification Failed', err.message || 'Incorrect pickup code.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const openEdit = (item: any) => {
     setEditItem(item);
     setEditImage(item.image_url || '');
@@ -254,24 +296,29 @@ export default function DashboardScreen() {
 
   const renderOrder = ({ item }: { item: VendorOrder }) => {
     const isReserved = item.status === 'reserved';
+    const cfg = V_ORDER_STATUS[item.status] || V_ORDER_STATUS.reserved;
     return (
       <View testID={`vendor-order-${item.order_id}`} style={styles.card}>
         <View style={styles.cardRow}>
           <View style={styles.cardInfo}>
             <Text style={styles.cardTitle} numberOfLines={1}>{item.food_item_name}</Text>
             <Text style={styles.cardSub}>{item.customer_name} · Qty: {item.quantity}</Text>
-            <Text style={styles.cardSub}>₹{item.total_amount} · {item.status.replace('_', ' ')}</Text>
+            <Text style={styles.cardSub}>Order #{(item.order_id || '').replace(/^order_?/i, '').slice(0, 8).toUpperCase()} · ₹{item.total_amount}</Text>
+            {item.pickup_start_time ? <Text style={styles.cardSub}>Pickup: {item.pickup_start_time} - {item.pickup_end_time}</Text> : null}
+          </View>
+          <View style={[styles.statusPill, { backgroundColor: cfg.color + '18' }]}>
+            <Text style={[styles.statusPillText, { color: cfg.color }]}>{cfg.label}</Text>
           </View>
         </View>
         {isReserved && (
           <View style={styles.actionRow}>
             <TouchableOpacity
-              testID={`pickup-btn-${item.order_id}`}
-              style={[styles.actionBtn, { backgroundColor: COLORS.info }]}
-              onPress={() => updateOrderStatus(item.order_id, 'picked_up')}
+              testID={`verify-pickup-btn-${item.order_id}`}
+              style={[styles.actionBtn, { backgroundColor: COLORS.primary }]}
+              onPress={() => { setVerifyOrder(item); setVerifyCode(''); }}
             >
-              <CheckCircle size={16} color="#fff" />
-              <Text style={styles.actionBtnText}>Mark Picked Up</Text>
+              <KeyRound size={16} color="#fff" />
+              <Text style={styles.actionBtnText}>Verify Pickup</Text>
             </TouchableOpacity>
             <TouchableOpacity
               testID={`cancel-btn-${item.order_id}`}
@@ -291,6 +338,25 @@ export default function DashboardScreen() {
       </View>
     );
   };
+
+  const renderOrderFilters = () => (
+    <View style={styles.orderFilterRow}>
+      {ORDER_FILTERS.map((f) => {
+        const active = orderFilter === f.key;
+        const count = orders.filter((o: any) => o.status === f.key).length;
+        return (
+          <TouchableOpacity
+            key={f.key}
+            testID={`order-filter-${f.key}`}
+            style={[styles.orderFilterChip, active && styles.orderFilterChipActive]}
+            onPress={() => setOrderFilter(f.key)}
+          >
+            <Text style={[styles.orderFilterText, active && styles.orderFilterTextActive]} numberOfLines={1}>{f.label} ({count})</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
 
   const renderEarningsOrder = ({ item }: { item: EarningsOrder }) => {
     const date = new Date(item.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
@@ -499,16 +565,17 @@ export default function DashboardScreen() {
       ) : (
         <FlatList
           testID={`vendor-${activeTab}-list`}
-          data={activeTab === 'menu' ? menu : activeTab === 'drops' ? drops.filter((d: any) => d.is_active) : orders}
+          data={activeTab === 'menu' ? menu : activeTab === 'drops' ? drops.filter((d: any) => d.is_active) : orders.filter((o: any) => o.status === orderFilter)}
           renderItem={activeTab === 'menu' ? renderMenuItem : activeTab === 'drops' ? renderDrop : renderOrder}
           keyExtractor={(item: any) => item.menu_item_id || item.item_id || item.order_id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          ListHeaderComponent={activeTab === 'orders' ? renderOrderFilters : undefined}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>
-                {activeTab === 'menu' ? 'No menu items yet' : activeTab === 'drops' ? 'No surplus drops' : 'No orders found'}
+                {activeTab === 'menu' ? 'No menu items yet' : activeTab === 'drops' ? 'No surplus drops' : `No ${(V_ORDER_STATUS[orderFilter]?.label || '').toLowerCase()} orders`}
               </Text>
               <Text style={styles.emptySubtitle}>
                 {activeTab === 'menu' ? 'Your menu is added by the Perfectly Good team.' : activeTab === 'drops' ? 'Tap "Add Surplus" to list a surplus deal!' : 'Orders will appear here.'}
@@ -517,6 +584,38 @@ export default function DashboardScreen() {
           }
         />
       )}
+
+      {/* Verify pickup modal */}
+      <Modal visible={!!verifyOrder} transparent animationType="slide" onRequestClose={() => setVerifyOrder(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Verify Pickup</Text>
+              <TouchableOpacity testID="close-verify" onPress={() => setVerifyOrder(null)} style={styles.modalClose}>
+                <X size={22} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalHint}>Ask the customer for their 6-digit pickup code and enter it below to complete the order.</Text>
+            <TextInput
+              testID="verify-code-input"
+              style={styles.codeInput}
+              value={verifyCode}
+              onChangeText={(t) => setVerifyCode(t.replace(/[^0-9]/g, '').slice(0, 6))}
+              placeholder="000000"
+              placeholderTextColor={COLORS.textMuted}
+              keyboardType="number-pad"
+              maxLength={6}
+              autoFocus
+            />
+            <TouchableOpacity testID="confirm-pickup-btn" style={[styles.saveBtn, verifying && { opacity: 0.7 }]} onPress={submitVerify} disabled={verifying}>
+              {verifying ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Confirm Pickup</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity testID="cancel-verify-btn" style={styles.modalCancelBtn} onPress={() => setVerifyOrder(null)}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Edit menu item (image / kcal / protein) */}
       <Modal visible={!!editItem} transparent animationType="slide" onRequestClose={() => setEditItem(null)}>
@@ -629,4 +728,15 @@ const styles = StyleSheet.create({
   editImageEmptyText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textMuted },
   editLabel: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginBottom: SPACING.xs },
   editInput: { backgroundColor: COLORS.background, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, paddingVertical: 12, fontSize: 15, fontFamily: 'DMSans_400Regular', color: COLORS.textPrimary },
+  // Order status + verify
+  statusPill: { alignSelf: 'flex-start', borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm, paddingVertical: 3 },
+  statusPillText: { fontSize: 11, fontFamily: 'DMSans_700Bold', textTransform: 'uppercase', letterSpacing: 0.4 },
+  orderFilterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs, marginBottom: SPACING.sm },
+  orderFilterChip: { paddingHorizontal: SPACING.sm + 2, paddingVertical: 6, borderRadius: RADIUS.full, backgroundColor: COLORS.borderLight },
+  orderFilterChipActive: { backgroundColor: COLORS.primary },
+  orderFilterText: { fontSize: 12, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary },
+  orderFilterTextActive: { color: '#fff' },
+  codeInput: { backgroundColor: COLORS.background, borderWidth: 1.5, borderColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 16, fontSize: 32, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary, textAlign: 'center', letterSpacing: 8, marginBottom: SPACING.md },
+  modalCancelBtn: { paddingVertical: 12, alignItems: 'center', marginTop: 4 },
+  modalCancelText: { fontSize: 15, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
 });
