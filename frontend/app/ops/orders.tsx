@@ -56,7 +56,12 @@ export default function Orders() {
   };
 
   const columns = [
-    { key: 'order_id', label: 'Order ID', width: 150, render: (r: any) => <Text style={{ fontSize: 12.5, fontWeight: '600' }}>{r.order_id}</Text> },
+    { key: 'order_id', label: 'Order ID', width: 170, render: (r: any) => (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Text style={{ fontSize: 12.5, fontWeight: '600' }}>{r.order_id}</Text>
+        {r.is_test ? <Badge label="TEST" tone="warn" /> : null}
+      </View>
+    ) },
     { key: 'customer_name', label: 'Customer', width: 130 },
     { key: 'vendor_name', label: 'Vendor', width: 150 },
     { key: 'food_item_name', label: 'Items', width: 160, render: (r: any) => <Text style={{ fontSize: 13 }}>{r.quantity}× {r.food_item_name}</Text> },
