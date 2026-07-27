@@ -111,6 +111,7 @@ export const opsApi = {
   refundOrder: (id: string) => apiFetch(`/ops/orders/${id}/refund`, { method: 'POST' }),
   createTestOrder: (vendor_id?: string) => apiFetch('/ops/orders/test', { method: 'POST', body: JSON.stringify({ vendor_id: vendor_id || null }) }),
   supportRequests: (p?: any) => apiFetch(`/ops/support-requests${qs(p)}`),
+  supportOpenCount: () => apiFetch('/ops/support-open-count'),
   supportDetail: (id: string) => apiFetch(`/ops/support-requests/${id}`),
   resolveSupport: (id: string) => apiFetch(`/ops/support-requests/${id}/resolve`, { method: 'PUT' }),
   enableSupportWhatsapp: (id: string) => apiFetch(`/ops/support-requests/${id}/whatsapp`, { method: 'PUT' }),

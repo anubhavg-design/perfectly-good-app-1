@@ -1171,6 +1171,13 @@ async def my_support_requests(request: Request):
     return [_support_public(r) for r in rows]
 
 
+@api.get("/ops/support-open-count")
+async def ops_support_open_count(request: Request):
+    await require_permission(request, "manage_support")
+    n = await db.support_requests.count_documents({"status": "open"})
+    return {"open": n}
+
+
 @api.get("/ops/support-requests")
 async def ops_list_support(request: Request, issue_type: Optional[str] = None, status: Optional[str] = None,
                            page: int = 1, page_size: int = 50):

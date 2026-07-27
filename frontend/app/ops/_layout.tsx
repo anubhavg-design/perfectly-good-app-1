@@ -33,12 +33,19 @@ export default function OpsLayout() {
   const isNarrow = width < 900;
   const [drawerOpen, setDrawerOpen] = useState(false);
   const insets = useSafeAreaInsets();
+  const [supportOpen, setSupportOpen] = useState(0);
 
   useEffect(() => {
     if (!loading && (!user || !STAFF.includes((user as any).role))) {
       router.replace('/');
     }
   }, [user, loading]);
+
+  useEffect(() => {
+    if (user && hasPerm(user, 'manage_support')) {
+      opsApi.supportOpenCount().then((r: any) => setSupportOpen(r?.open || 0)).catch(() => {});
+    }
+  }, [user, pathname]);
 
   if (loading || !user) return <View style={{ flex: 1, backgroundColor: C.bg }}><Spinner label="Loading dashboard…" /></View>;
   if (!STAFF.includes((user as any).role)) return null;
@@ -66,6 +73,9 @@ export default function OpsLayout() {
               style={[styles.navItem, active && styles.navItemActive]}>
               <Icon size={19} color={active ? C.sidebarActiveText : C.sidebarItem} />
               <Text style={[styles.navLabel, active && { color: C.sidebarActiveText, fontWeight: '700' }]}>{n.label}</Text>
+              {n.route === '/ops/support-requests' && supportOpen > 0 ? (
+                <View style={styles.navBadge}><Text style={styles.navBadgeText}>{supportOpen > 99 ? '99+' : supportOpen}</Text></View>
+              ) : null}
             </Pressable>
           );
         })}
@@ -173,6 +183,8 @@ const styles = StyleSheet.create({
   navItem: { flexDirection: 'row', alignItems: 'center', gap: SP.md, paddingHorizontal: SP.lg, paddingVertical: 12, marginHorizontal: SP.sm, borderRadius: R.md },
   navItemActive: { backgroundColor: C.sidebarActiveBg },
   navLabel: { color: C.sidebarItem, fontSize: 14.5, fontWeight: '500' },
+  navBadge: { marginLeft: 'auto', minWidth: 22, height: 20, borderRadius: 10, backgroundColor: C.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  navBadgeText: { color: '#fff', fontSize: 11.5, fontWeight: '800' },
   userBox: { flexDirection: 'row', alignItems: 'center', gap: SP.sm, padding: SP.lg, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
   userName: { color: '#fff', fontSize: 13.5, fontWeight: '700' },
   userRole: { color: C.sidebarItem, fontSize: 12 },
