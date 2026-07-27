@@ -59,6 +59,7 @@ export default function RootLayout() {
         <Stack.Screen name="privacy-policy" />
         <Stack.Screen name="support/index" />
         <Stack.Screen name="support/[type]" />
+        <Stack.Screen name="support/my-requests" />
       </Stack>
     </AuthProvider>
   );

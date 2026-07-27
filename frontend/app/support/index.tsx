@@ -15,7 +15,9 @@ export default function SupportHome() {
           <ArrowLeft size={24} color={COLORS.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Help & Support</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity testID="my-requests-link" onPress={() => router.push('/support/my-requests')} hitSlop={10}>
+          <Text style={styles.myReqLink}>My Requests</Text>
+        </TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.subtitle}>Need help with your order? Choose an issue below and we'll help you quickly.</Text>
@@ -54,6 +56,7 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: 2 },
   headerTitle: { fontSize: 18, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  myReqLink: { fontSize: 13.5, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
   content: { padding: SPACING.md, paddingBottom: SPACING.xxl },
   subtitle: { fontSize: 14.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginBottom: SPACING.lg, lineHeight: 20 },
   card: {

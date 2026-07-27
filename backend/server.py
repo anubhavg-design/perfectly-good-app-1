@@ -128,6 +128,7 @@ PERMISSIONS = [
     "view_finance", "manage_payouts",
     "view_users", "manage_users",
     "manage_settings", "manage_roles", "add_notes",
+    "manage_support",
 ]
 
 ROLE_PERMISSIONS = {
@@ -137,7 +138,7 @@ ROLE_PERMISSIONS = {
     "operations": {
         "view_dashboard", "view_vendors", "manage_vendors", "manage_menu",
         "upload_images", "ai_import", "view_orders", "update_order_status",
-        "manage_orders", "add_notes",
+        "manage_orders", "add_notes", "manage_support",
     },
     "customer_success": {
         "view_dashboard", "view_vendors", "view_orders", "update_order_status", "add_notes",
@@ -1109,6 +1110,11 @@ async def create_support_request(body: SupportRequestBody, request: Request):
         "what_happened": body.what_happened if body.issue_type == "app_bug" else None,
         "order": order_snapshot,
         "status": "open",
+        "whatsapp_enabled": False,
+        "whatsapp_enabled_by": None,
+        "whatsapp_enabled_at": None,
+        "resolved_by": None,
+        "resolved_at": None,
         "created_at": now,
     }
     await db.support_requests.insert_one(doc)
@@ -1135,6 +1141,95 @@ async def create_support_request(body: SupportRequestBody, request: Request):
     email_sent = await _send_support_email(f"[Support] {label} — {doc['customer_name']}", html, text)
 
     return {"support_id": req_id, "message": "Support request submitted", "email_sent": email_sent}
+
+
+def _support_public(d: dict) -> dict:
+    """Shape a support ticket for the customer's own view (includes whatsapp state)."""
+    return {
+        "support_id": d.get("support_id"),
+        "issue_type": d.get("issue_type"),
+        "issue_label": d.get("issue_label"),
+        "message": d.get("message", ""),
+        "status": d.get("status", "open"),
+        "whatsapp_enabled": bool(d.get("whatsapp_enabled")),
+        "customer_name": d.get("customer_name", ""),
+        "phone": d.get("phone", ""),
+        "device_model": d.get("device_model"),
+        "app_version": d.get("app_version"),
+        "what_happened": d.get("what_happened"),
+        "order": d.get("order", {}),
+        "created_at": d.get("created_at").isoformat() if hasattr(d.get("created_at"), "isoformat") else d.get("created_at"),
+    }
+
+
+@api.get("/support/my-requests")
+async def my_support_requests(request: Request):
+    user = await get_current_user(request)
+    rows = await db.support_requests.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return [_support_public(r) for r in rows]
+
+
+@api.get("/ops/support-requests")
+async def ops_list_support(request: Request, issue_type: Optional[str] = None, status: Optional[str] = None,
+                           page: int = 1, page_size: int = 50):
+    await require_permission(request, "manage_support")
+    query: dict = {}
+    if issue_type:
+        query["issue_type"] = issue_type
+    if status:
+        query["status"] = status
+    total = await db.support_requests.count_documents(query)
+    skip = max(page - 1, 0) * page_size
+    rows = await db.support_requests.find(
+        query, {"_id": 0, "photo_base64": 0}
+    ).sort("created_at", -1).skip(skip).limit(page_size).to_list(page_size)
+    for r in rows:
+        if hasattr(r.get("created_at"), "isoformat"):
+            r["created_at"] = r["created_at"].isoformat()
+        r["order_id"] = (r.get("order") or {}).get("order_id")
+        r["restaurant_name"] = (r.get("order") or {}).get("restaurant_name")
+    return {"items": rows, "total": total, "page": page, "page_size": page_size}
+
+
+@api.get("/ops/support-requests/{support_id}")
+async def ops_support_detail(support_id: str, request: Request):
+    await require_permission(request, "manage_support")
+    d = await db.support_requests.find_one({"support_id": support_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Support request not found")
+    for k in ("created_at", "whatsapp_enabled_at", "resolved_at"):
+        if hasattr(d.get(k), "isoformat"):
+            d[k] = d[k].isoformat()
+    return d
+
+
+@api.put("/ops/support-requests/{support_id}/resolve")
+async def ops_support_resolve(support_id: str, request: Request):
+    user = await require_permission(request, "manage_support")
+    result = await db.support_requests.update_one(
+        {"support_id": support_id},
+        {"$set": {"status": "resolved", "resolved_by": user.get("name") or user.get("email"),
+                  "resolved_at": datetime.now(timezone.utc)}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Support request not found")
+    return {"message": "Marked as resolved", "status": "resolved"}
+
+
+@api.put("/ops/support-requests/{support_id}/whatsapp")
+async def ops_support_enable_whatsapp(support_id: str, request: Request):
+    user = await require_permission(request, "manage_support")
+    result = await db.support_requests.update_one(
+        {"support_id": support_id},
+        {"$set": {"whatsapp_enabled": True, "whatsapp_enabled_by": user.get("name") or user.get("email"),
+                  "whatsapp_enabled_at": datetime.now(timezone.utc)}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Support request not found")
+    return {"message": "WhatsApp enabled", "whatsapp_enabled": True}
+
 
 
 

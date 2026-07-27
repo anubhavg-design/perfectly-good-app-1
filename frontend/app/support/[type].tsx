@@ -78,8 +78,8 @@ export default function SupportDetail() {
         app_version: issue?.isBug ? appVersion : undefined,
         what_happened: issue?.isBug ? whatHappened : undefined,
       });
-      Alert.alert('Request Submitted', 'Thanks! Our team has received your request and will get back to you shortly.', [
-        { text: 'Done', onPress: () => router.replace('/(tabs)/profile') },
+      Alert.alert('Request Received', 'Thanks! Your request has been received and is under review. Our team will get back to you shortly.', [
+        { text: 'View My Requests', onPress: () => router.replace('/support/my-requests') },
       ]);
     } catch (e: any) {
       Alert.alert('Could not submit', e.message || 'Please try again.');

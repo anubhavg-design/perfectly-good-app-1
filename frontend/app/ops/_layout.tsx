@@ -4,7 +4,7 @@ import { Slot, usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   LayoutDashboard, Store, ShoppingBag, Users, Wallet, Settings as SettingsIcon,
-  Menu as MenuIcon, X, Search, LogOut, BarChart3, AlertTriangle,
+  Menu as MenuIcon, X, Search, LogOut, BarChart3, AlertTriangle, LifeBuoy,
 } from 'lucide-react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { opsApi } from '../../src/api/opsApi';
@@ -19,6 +19,7 @@ const NAV = [
   { label: 'Users', route: '/ops/users', icon: Users, perm: 'view_users' },
   { label: 'Payouts', route: '/ops/payouts', icon: Wallet, perm: 'view_finance' },
   { label: 'Failed Payments', route: '/ops/payment-failures', icon: AlertTriangle, perm: 'view_finance' },
+  { label: 'Support Requests', route: '/ops/support-requests', icon: LifeBuoy, perm: 'manage_support' },
   { label: 'Settings', route: '/ops/settings', icon: SettingsIcon, perm: 'view_dashboard' },
 ];
 

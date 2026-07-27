@@ -110,6 +110,10 @@ export const opsApi = {
   orderStatus: (id: string, status: string) => apiFetch(`/ops/orders/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   refundOrder: (id: string) => apiFetch(`/ops/orders/${id}/refund`, { method: 'POST' }),
   createTestOrder: (vendor_id?: string) => apiFetch('/ops/orders/test', { method: 'POST', body: JSON.stringify({ vendor_id: vendor_id || null }) }),
+  supportRequests: (p?: any) => apiFetch(`/ops/support-requests${qs(p)}`),
+  supportDetail: (id: string) => apiFetch(`/ops/support-requests/${id}`),
+  resolveSupport: (id: string) => apiFetch(`/ops/support-requests/${id}/resolve`, { method: 'PUT' }),
+  enableSupportWhatsapp: (id: string) => apiFetch(`/ops/support-requests/${id}/whatsapp`, { method: 'PUT' }),
 
   listUsers: (p?: any) => apiFetch(`/ops/users${qs(p)}`),
 

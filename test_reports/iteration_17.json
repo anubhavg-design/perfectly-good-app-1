@@ -1,0 +1,26 @@
+{
+  "summary": "Tested Support Requests module + WhatsApp gating end-to-end. Backend: 19/19 pytest cases pass (RBAC across admin/operations/finance, list newest-first, photo omitted from list but present in detail, resolve/whatsapp actions with 200/403/404, customer my-requests reflects whatsapp_enabled). Frontend ops (1280x900): 'Support Requests' appears in the sidebar for both admin & operations, page loads with 20 tickets, Issue Type + Status filters render, View opens a detail Sheet with all fields (Customer Name, Phone, Issue Type, Order ID, Restaurant, Order Amount, Pickup, Description, Submitted, Uploaded Photo section for wrong_item) and both 'Mark as Resolved' + 'Enable WhatsApp Support' buttons render. Frontend customer (390x844): Fresh customer submits 'Other' ticket -> /support/my-requests shows Open + 'Your request is under review. We'll update you soon.' with NO WhatsApp button; after admin enables WhatsApp and page is re-focused, green 'Contact via WhatsApp' button appears (testID whatsapp-<support_id>).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_support_ops.py",
+    "/app/test_reports/pytest/pytest_iter17_support_ops.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Nit (non-blocking): /app/frontend/app/ops/support-requests.tsx uses window `alert(e.message)` on errors (lines 29,35,40) — acceptable on web ops but not ideal in RN; keep for now."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_support_ops.py (new)"
+  ],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "100% (all critical flows verified)"},
+  "seed_data_creation": "Registered fresh customer test_ui_7a71dd91@example.com / TestPass123 with ticket support_fcdde65af950 (Other, WhatsApp enabled during test). Also several TEST_Support_* customers created by pytest — all tickets are TEST_-prefixed for easy cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Ops login button text is 'Log In' (exact) and appears twice on the login screen (tab + submit); click the last occurrence. Support Requests testIDs on customer app: my-request-<id>, whatsapp-<id>, myreq-back. Ops detail buttons rendered as Text ('View', 'Mark as Resolved', 'Enable WhatsApp Support'). Operations login: operations@perfectlygood.in / ops12345 (note test_credentials.md still lists older per-person ops emails — the review-request creds work). Finance login (finance@perfectlygood.in / finance12345) also works and returns 403 on /api/ops/support-requests as expected."
+}

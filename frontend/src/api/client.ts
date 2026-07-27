@@ -153,6 +153,7 @@ export const supportApi = {
     issue_type: string; message?: string; photo_base64?: string | null;
     device_model?: string; app_version?: string; what_happened?: string;
   }) => apiFetch('/support/requests', { method: 'POST', body: JSON.stringify(data) }),
+  myRequests: () => apiFetch('/support/my-requests'),
 };
 
 // Drops endpoints
