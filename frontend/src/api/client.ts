@@ -156,6 +156,11 @@ export const supportApi = {
   myRequests: () => apiFetch('/support/my-requests'),
 };
 
+// Account deletion (Apple 5.1.1(v))
+export const accountApi = {
+  deleteAccount: () => apiFetch('/auth/me', { method: 'DELETE' }),
+};
+
 // Drops endpoints
 export const dropsApi = {
   list: (params: { lat?: number; lon?: number; search?: string; category?: string; max_price?: number; sort_by?: string }) => {

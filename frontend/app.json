@@ -11,9 +11,13 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "in.perfectlygood.app",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Find surplus food deals near you",
-        "NSCameraUsageDescription": "Take a photo to report a wrong item"
+        "NSCameraUsageDescription": "Take a photo to report a wrong item",
+        "NSPhotoLibraryUsageDescription": "Upload photos for your menu items and reports"
       }
     },
     "android": {

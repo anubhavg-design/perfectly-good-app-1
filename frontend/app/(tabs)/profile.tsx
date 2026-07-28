@@ -4,9 +4,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy } from 'lucide-react-native';
+import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy, Trash2 } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
+import { accountApi } from '../../src/api/client';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -30,6 +31,30 @@ export default function ProfileScreen() {
   };
 
   if (!user) return null;
+
+  const confirmDelete = () => {
+    Alert.alert(
+      'Delete Account',
+      'This permanently deletes your account and personal data. This cannot be undone. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await accountApi.deleteAccount();
+              Alert.alert('Account Deleted', 'Your account and data have been deleted.');
+              await logout().catch(() => {});
+              setTimeout(() => router.replace('/'), 100);
+            } catch (e: any) {
+              Alert.alert('Could not delete account', e.message || 'Please try again.');
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const roleLabel = user.role === 'admin' ? 'Administrator' : user.role === 'vendor' ? 'Vendor' : 'Food Rescuer';
   const memberSince = new Date(user.created_at).toLocaleDateString('en-IN', {
@@ -153,6 +178,16 @@ export default function ProfileScreen() {
           <LogOut size={20} color={COLORS.error} />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          testID="delete-account-btn"
+          style={styles.deleteBtn}
+          onPress={confirmDelete}
+          activeOpacity={0.8}
+        >
+          <Trash2 size={18} color={COLORS.textMuted} />
+          <Text style={styles.deleteText}>Delete Account</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -213,4 +248,9 @@ const styles = StyleSheet.create({
     padding: SPACING.md, marginTop: SPACING.md,
   },
   logoutText: { fontSize: 16, fontFamily: 'DMSans_700Bold', color: COLORS.error },
+  deleteBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.sm,
+    paddingVertical: SPACING.md, marginTop: SPACING.sm,
+  },
+  deleteText: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.textMuted, textDecorationLine: 'underline' },
 });

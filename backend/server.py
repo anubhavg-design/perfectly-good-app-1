@@ -321,6 +321,26 @@ async def auth_me(request: Request):
     user = await get_current_user(request)
     return user_response(user)
 
+@api.delete("/auth/me")
+async def delete_my_account(request: Request):
+    """In-app account deletion (Apple 5.1.1(v)). Removes the user's account and
+    associated personal data. Orders are anonymised so vendor/payout records stay intact."""
+    user = await get_current_user(request)
+    if user.get("role") in STAFF_ROLES:
+        raise HTTPException(status_code=403, detail="Staff accounts cannot be deleted from the app.")
+    uid = user["user_id"]
+    await db.support_requests.delete_many({"user_id": uid})
+    await db.pending_orders.delete_many({"user_id": uid})
+    await db.password_reset_tokens.delete_many({"user_id": uid})
+    await db.orders.update_many({"user_id": uid}, {"$set": {"user_name": "Deleted user"}})
+    # If this user owns a vendor profile, detach it (kept for records).
+    await db.vendors.update_many({"user_id": uid}, {"$set": {"user_id": None}})
+    await db.users.delete_one({"user_id": uid})
+    response = JSONResponse(content={"message": "Account deleted"})
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+    return response
+
 @api.post("/auth/logout")
 async def auth_logout():
     response = JSONResponse(content={"message": "Logged out"})
