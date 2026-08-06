@@ -1,0 +1,28 @@
+{
+  "summary": "Sold-Out feature tested end-to-end. Backend pytest: 13/13 pass in /app/backend/tests/test_sold_out.py — vendor toggle endpoint (auth/RBAC + happy path + 404), /api/drops hides sold-out surplus (Veg Momos disappears), /api/restaurants/{vendor_id} excludes sold-out items from BOTH surplus_items and menu_items lists, POST /api/orders/create returns HTTP 400 with detail 'This item is sold out' for BOTH surplus (Veg Momos) and takeaway (Paneer Roll) — verified this 400 is raised BEFORE the razorpay_client check (server.py L690-703 executes before L717), and toggling back to in_stock=True fully restores visibility + orderability. Frontend (mobile 390x844, vendor soldouttest@test.com/vendor123): Dashboard > Menu shows Sold Out switch per item with testID toggle-soldout-menu_81837cef4ee5 and toggle-soldout-menu_38278f385303. Toggling ON greys the card, shows 'SOLD OUT' badge and red caption 'Sold out — hidden from customers (auto-resets at midnight)'. Toggling OFF restores 'Available to customers'. Both test items left at in_stock=True.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sold_out.py",
+    "/app/test_reports/pytest/pytest_iter19_soldout.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Nit: /app/frontend/app/(tabs)/dashboard.tsx L270 uses `onValueChange={() => toggleStock(item.menu_item_id, soldOut)}` which ignores the new value emitted by Switch and instead passes the OLD `soldOut` (which equals the desired new in_stock). Behaviour is correct because of the inversion, but it's non-obvious — a more readable form would be `onValueChange={(v) => toggleStock(item.menu_item_id, !v)}` where `v` is the new sold-out state. Not a bug.",
+  "Nit: /app/backend/server.py `toggle_menu_stock` (L1510) sets `sold_out_at = today_ist_str()` on every False-toggle even if the item was already sold out earlier the same day. That effectively resets the stamp to today and is compatible with the midnight-reset design, but if the intent was to preserve the FIRST sold-out timestamp, add `sold_out_at: {$exists: false}` guard. Current behaviour looks intentional."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_sold_out.py (new — 13 tests, all passing, covers full sold-out feature)"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% (all requested UI checks verified)"},
+  "seed_data_creation": "Registered one throwaway customer via /api/auth/register (email TEST_soldout_<hex>@test.com) to exercise 403 RBAC + order-create blocking. No vendor/menu-item creation. Both menu items (Veg Momos menu_81837cef4ee5 and Paneer Roll menu_38278f385303) left at in_stock=True at end via autouse fixture.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reusable regression: /app/backend/tests/test_sold_out.py (pytest). Login form is at app root (/), NOT /login (which 404s as 'Unmatched Route'). Vendor test creds: soldouttest@test.com / vendor123 → vendor_5a535d0e7dfb. testIDs on login screen: email-input, password-input; menu toggles: toggle-soldout-<menu_item_id>. RN Web renders <Switch> as <input type=checkbox> — click force=True works. Order-create blocks sold-out BEFORE Razorpay: verified by code path (server.py L690-703 raises 400 before razorpay_client access at L717).",
+  "rca_of_issue": "N/A — this is a feature verification pass, no bugs found."
+}

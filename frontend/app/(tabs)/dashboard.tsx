@@ -149,10 +149,10 @@ export default function DashboardScreen() {
     }
   };
 
-  const toggleStock = async (id: string, inStock: boolean) => {
+  const toggleStock = async (id: string, newInStock: boolean) => {
     try {
-      await vendorApi.toggleMenuItem(id, !inStock);
-      setMenu(prev => prev.map(m => m.menu_item_id === id ? { ...m, in_stock: !inStock } : m));
+      await vendorApi.toggleMenuItem(id, newInStock);
+      setMenu(prev => prev.map(m => m.menu_item_id === id ? { ...m, in_stock: newInStock } : m));
     } catch (err: any) {
       Alert.alert('Error', err.message);
     }
@@ -232,15 +232,15 @@ export default function DashboardScreen() {
   };
 
   const renderMenuItem = ({ item }: { item: any }) => {
-    const inStock = item.in_stock !== false;
+    const soldOut = item.in_stock === false;
     const isVeg = item.food_type !== 'non_veg';
     return (
-      <View testID={`vendor-menu-${item.menu_item_id}`} style={styles.card}>
+      <View testID={`vendor-menu-${item.menu_item_id}`} style={[styles.card, soldOut && styles.cardSoldOut]}>
         <View style={styles.cardRow}>
           {item.image_url ? (
-            <Image source={{ uri: item.image_url }} style={styles.menuThumb} />
+            <Image source={{ uri: item.image_url }} style={[styles.menuThumb, soldOut && styles.dimmed]} />
           ) : (
-            <View style={[styles.menuThumb, styles.menuThumbEmpty]}>
+            <View style={[styles.menuThumb, styles.menuThumbEmpty, soldOut && styles.dimmed]}>
               <Camera size={18} color={COLORS.textMuted} />
             </View>
           )}
@@ -249,21 +249,27 @@ export default function DashboardScreen() {
               <View style={{ width: 12, height: 12, borderRadius: 2, borderWidth: 1.5, borderColor: isVeg ? COLORS.success : COLORS.error, alignItems: 'center', justifyContent: 'center' }}>
                 <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isVeg ? COLORS.success : COLORS.error }} />
               </View>
-              <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
+              <Text style={[styles.cardTitle, soldOut && styles.dimmedText]} numberOfLines={1}>{item.name}</Text>
+              {soldOut ? (
+                <View style={styles.soldOutBadge}><Text style={styles.soldOutBadgeText}>SOLD OUT</Text></View>
+              ) : null}
             </View>
             <Text style={styles.cardSub}>₹{item.original_price}{item.available_today ? '  ·  Surplus live' : ''}</Text>
             {(item.kcal != null || item.protein != null) ? (
               <Text style={styles.cardSub}>{item.kcal != null ? `${item.kcal} kcal` : ''}{item.kcal != null && item.protein != null ? ' · ' : ''}{item.protein != null ? `${item.protein}g protein` : ''}</Text>
             ) : null}
-            <Text style={[styles.cardSub, { color: inStock ? COLORS.success : COLORS.textMuted }]}>{inStock ? 'In stock (visible to customers)' : 'Out of stock (hidden)'}</Text>
+            <Text style={[styles.cardSub, { color: soldOut ? COLORS.accentUrgent : COLORS.success }]}>
+              {soldOut ? 'Sold out — hidden from customers (auto-resets at midnight)' : 'Available to customers'}
+            </Text>
           </View>
-          <View style={{ alignItems: 'center', gap: 10 }}>
+          <View style={{ alignItems: 'center', gap: 6 }}>
+            <Text style={styles.toggleLabel}>Sold Out</Text>
             <Switch
-              testID={`toggle-stock-${item.menu_item_id}`}
-              value={inStock}
-              onValueChange={() => toggleStock(item.menu_item_id, inStock)}
-              trackColor={{ false: COLORS.border, true: COLORS.primary + '60' }}
-              thumbColor={inStock ? COLORS.primary : COLORS.textMuted}
+              testID={`toggle-soldout-${item.menu_item_id}`}
+              value={soldOut}
+              onValueChange={() => toggleStock(item.menu_item_id, soldOut)}
+              trackColor={{ false: COLORS.border, true: COLORS.accentUrgent + '70' }}
+              thumbColor={soldOut ? COLORS.accentUrgent : COLORS.textMuted}
             />
             <TouchableOpacity testID={`edit-item-${item.menu_item_id}`} style={styles.editBtn} onPress={() => openEdit(item)}>
               <Pencil size={14} color={COLORS.primary} />
@@ -676,6 +682,12 @@ const styles = StyleSheet.create({
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   listContent: { paddingHorizontal: SPACING.md, paddingBottom: SPACING.xxl },
   card: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.sm, ...SHADOWS.small },
+  cardSoldOut: { backgroundColor: COLORS.borderLight, borderWidth: 1, borderColor: COLORS.accentUrgent + '40' },
+  dimmed: { opacity: 0.4 },
+  dimmedText: { color: COLORS.textMuted },
+  soldOutBadge: { backgroundColor: COLORS.accentUrgent + '1A', borderRadius: RADIUS.sm, paddingHorizontal: 6, paddingVertical: 2 },
+  soldOutBadgeText: { fontSize: 10, fontFamily: 'DMSans_700Bold', color: COLORS.accentUrgent, letterSpacing: 0.5 },
+  toggleLabel: { fontSize: 11, fontFamily: 'DMSans_500Medium', color: COLORS.textMuted },
   cardRow: { flexDirection: 'row', alignItems: 'center' },
   cardInfo: { flex: 1 },
   cardTitle: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },

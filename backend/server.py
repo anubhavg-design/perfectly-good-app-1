@@ -12,6 +12,7 @@ import secrets
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional
 from fastapi import FastAPI, APIRouter, Request, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -28,6 +29,13 @@ import base64
 import io
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# Sold-out items reset daily at midnight IST; helpers below.
+IST = ZoneInfo("Asia/Kolkata")
+
+def today_ist_str() -> str:
+    return datetime.now(IST).strftime("%Y-%m-%d")
 
 # ── Config ──────────────────────────────────────────────────────────────
 MONGO_URL = os.environ["MONGO_URL"]
@@ -497,7 +505,7 @@ async def list_drops(
 ):
     # Only items toggled available today, from active vendors
     active_vendor_ids = await db.vendors.distinct("vendor_id", {"status": {"$ne": "inactive"}})
-    query: dict = {"available_today": True, "vendor_id": {"$in": active_vendor_ids}}
+    query: dict = {"available_today": True, "in_stock": {"$ne": False}, "vendor_id": {"$in": active_vendor_ids}}
     if search:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
@@ -679,6 +687,8 @@ async def create_order(body: CreateOrderBody, request: Request):
         item = await db.menu_items.find_one({"menu_item_id": body.food_item_id, "available_today": True}, {"_id": 0})
         if not item:
             raise HTTPException(status_code=404, detail="Item not available")
+        if item.get("in_stock") is False:
+            raise HTTPException(status_code=400, detail="This item is sold out")
         qty_avail = item.get("quantity_available")
         if qty_avail is not None and body.quantity > qty_avail:
             raise HTTPException(status_code=400, detail="Not enough quantity available")
@@ -689,6 +699,8 @@ async def create_order(body: CreateOrderBody, request: Request):
         item = await db.menu_items.find_one({"menu_item_id": body.food_item_id}, {"_id": 0})
         if not item:
             raise HTTPException(status_code=404, detail="Item not found")
+        if item.get("in_stock") is False:
+            raise HTTPException(status_code=400, detail="This item is sold out")
         vendor = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
         disc = (vendor or {}).get("discount_percentage") or 0
         base_price = item.get("original_price") or item.get("discounted_price") or 0
@@ -1497,16 +1509,21 @@ async def _bulk_update_images(vendor: dict, raw: bytes) -> dict:
 
 @api.put("/vendor/menu/{item_id}/toggle")
 async def toggle_menu_stock(item_id: str, body: ToggleStockBody, request: Request):
-    """Vendor toggles a regular menu item in/out of stock (customer visibility)."""
+    """Vendor toggles a regular menu item's Sold Out state.
+    in_stock=False => sold out (hidden from customers + not orderable). We stamp
+    the IST date it was marked so the daily midnight reset (and restart catch-up)
+    can bring it back automatically. in_stock=True => available again."""
     user = await get_current_user(request)
     if user["role"] not in ("vendor", "admin"):
         raise HTTPException(status_code=403, detail="Not a vendor")
     vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
+    set_fields = {"in_stock": body.in_stock, "updated_at": datetime.now(timezone.utc)}
+    set_fields["sold_out_at"] = None if body.in_stock else today_ist_str()
     result = await db.menu_items.update_one(
         {"menu_item_id": item_id, "vendor_id": vendor["vendor_id"]},
-        {"$set": {"in_stock": body.in_stock, "updated_at": datetime.now(timezone.utc)}},
+        {"$set": set_fields},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -3182,15 +3199,50 @@ async def migrate_v2():
     logger.info("migrate_v2 complete")
 
 
+# ── Sold-out daily reset (midnight IST) ─────────────────────────────────
+async def reset_sold_out_items(catch_up: bool = False):
+    """Mark all sold-out items available again.
+    - Scheduled run (catch_up=False): reset every sold-out item.
+    - Startup catch-up (catch_up=True): reset only items marked sold out on a
+      previous day, so items a vendor marked sold out *today* stay sold out
+      across a server restart."""
+    if catch_up:
+        q = {"in_stock": False, "$or": [
+            {"sold_out_at": {"$exists": False}},
+            {"sold_out_at": None},
+            {"sold_out_at": {"$lt": today_ist_str()}},
+        ]}
+    else:
+        q = {"in_stock": False}
+    res = await db.menu_items.update_many(
+        q, {"$set": {"in_stock": True, "sold_out_at": None, "updated_at": datetime.now(timezone.utc)}}
+    )
+    if res.modified_count:
+        logger.info(f"[sold-out reset] {'catch-up ' if catch_up else ''}reset {res.modified_count} item(s) to available")
+    return res.modified_count
+
+
+scheduler = AsyncIOScheduler(timezone=IST)
+
+
 # ── Startup / Shutdown ──────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
     await seed_data()
     await migrate_v2()
+    # Bring back items whose sold-out day has passed while the server was down.
+    await reset_sold_out_items(catch_up=True)
+    # Reset every sold-out item back to available at 00:00 IST daily.
+    scheduler.add_job(reset_sold_out_items, "cron", hour=0, minute=0,
+                      id="sold_out_reset", replace_existing=True)
+    if not scheduler.running:
+        scheduler.start()
     logger.info("Perfectly Good API started")
 
 @app.on_event("shutdown")
 async def shutdown():
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
     mongo_client.close()
 
 # ── Wire up ─────────────────────────────────────────────────────────────
