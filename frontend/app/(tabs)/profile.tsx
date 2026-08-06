@@ -10,6 +10,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import GuestGate from '../../src/components/GuestGate';
 
 const VENDOR_CONTACT_EMAIL = 'chaitanya@perfectlygood.in';
+const STAFF_ROLES = ['admin', 'operations', 'customer_success', 'finance'];
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -77,6 +78,7 @@ export default function ProfileScreen() {
   }
 
   const roleLabel = user.role === 'admin' ? 'Administrator' : user.role === 'vendor' ? 'Vendor' : 'Food Rescuer';
+  const isStaff = STAFF_ROLES.includes(user.role);
   const memberSince = new Date(user.created_at).toLocaleDateString('en-IN', {
     month: 'long', year: 'numeric',
   });
@@ -131,15 +133,15 @@ export default function ProfileScreen() {
             <TouchableOpacity
               testID="admin-panel-btn"
               style={styles.actionCard}
-              onPress={() => router.push('/admin')}
+              onPress={() => router.push('/ops')}
               activeOpacity={0.8}
             >
               <View style={[styles.actionIcon, { backgroundColor: '#EDE9FE' }]}>
                 <Shield size={20} color="#7C3AED" />
               </View>
               <View style={styles.actionContent}>
-                <Text style={styles.actionTitle}>Admin Panel</Text>
-                <Text style={styles.actionSubtitle}>Manage vendors and menu items</Text>
+                <Text style={styles.actionTitle}>Admin Dashboard</Text>
+                <Text style={styles.actionSubtitle}>View metrics, vendors, orders and payouts</Text>
               </View>
               <ChevronRight size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
@@ -211,21 +213,23 @@ export default function ProfileScreen() {
             <ChevronRight size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            testID="settings-privacy-btn"
-            style={styles.actionCard}
-            onPress={() => router.push('/privacy-settings')}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#F1F5F9' }]}>
-              <Settings size={20} color={COLORS.textSecondary} />
-            </View>
-            <View style={styles.actionContent}>
-              <Text style={styles.actionTitle}>Settings & Privacy</Text>
-              <Text style={styles.actionSubtitle}>Manage data and delete account</Text>
-            </View>
-            <ChevronRight size={20} color={COLORS.textMuted} />
-          </TouchableOpacity>
+          {!isStaff && (
+            <TouchableOpacity
+              testID="settings-privacy-btn"
+              style={styles.actionCard}
+              onPress={() => router.push('/privacy-settings')}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: '#F1F5F9' }]}>
+                <Settings size={20} color={COLORS.textSecondary} />
+              </View>
+              <View style={styles.actionContent}>
+                <Text style={styles.actionTitle}>Settings & Privacy</Text>
+                <Text style={styles.actionSubtitle}>Manage data and delete account</Text>
+              </View>
+              <ChevronRight size={20} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Logout */}

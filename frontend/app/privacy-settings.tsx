@@ -9,8 +9,9 @@ import { accountApi } from '../src/api/client';
 
 export default function PrivacySettings() {
   const router = useRouter();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const [deleting, setDeleting] = useState(false);
+  const isStaff = ['admin', 'operations', 'customer_success', 'finance'].includes((user as any)?.role);
 
   const doDelete = async () => {
     setDeleting(true);
@@ -90,22 +91,32 @@ export default function PrivacySettings() {
 
         <Text style={[styles.sectionLabel, { marginTop: SPACING.lg }]}>DANGER ZONE</Text>
 
-        <TouchableOpacity
-          testID="delete-account-btn"
-          style={styles.deleteRow}
-          onPress={confirmDelete}
-          disabled={deleting}
-          activeOpacity={0.85}
-        >
-          <View style={[styles.rowIcon, { backgroundColor: '#FEF2F2' }]}>
-            <Trash2 size={20} color={COLORS.error} />
+        {isStaff ? (
+          <View style={styles.infoCard}>
+            <ShieldCheck size={18} color={COLORS.primary} />
+            <Text style={styles.infoText}>
+              Account deletion is disabled for staff accounts. Please contact your
+              administrator to make changes to your account.
+            </Text>
           </View>
-          <View style={styles.rowContent}>
-            <Text style={[styles.rowTitle, { color: COLORS.error }]}>Delete Account</Text>
-            <Text style={styles.rowSub}>Permanently delete your account and data</Text>
-          </View>
-          {deleting ? <ActivityIndicator color={COLORS.error} /> : <ChevronRight size={20} color={COLORS.error} />}
-        </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            testID="delete-account-btn"
+            style={styles.deleteRow}
+            onPress={confirmDelete}
+            disabled={deleting}
+            activeOpacity={0.85}
+          >
+            <View style={[styles.rowIcon, { backgroundColor: '#FEF2F2' }]}>
+              <Trash2 size={20} color={COLORS.error} />
+            </View>
+            <View style={styles.rowContent}>
+              <Text style={[styles.rowTitle, { color: COLORS.error }]}>Delete Account</Text>
+              <Text style={styles.rowSub}>Permanently delete your account and data</Text>
+            </View>
+            {deleting ? <ActivityIndicator color={COLORS.error} /> : <ChevronRight size={20} color={COLORS.error} />}
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
