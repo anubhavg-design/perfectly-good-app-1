@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,48 +10,41 @@ import {
   NativeScrollEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import {
-  Sparkles,
-  UtensilsCrossed,
-  Tag,
-  ShoppingBag,
-  KeyRound,
-  LifeBuoy,
-  ArrowRight,
-} from 'lucide-react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as Location from 'expo-location';
+import { ArrowRight } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS } from '../src/constants/theme';
 import { useAuth } from '../src/context/AuthContext';
-import { markOnboardingSeen } from '../src/utils/onboarding';
+import {
+  markOnboardingSeen,
+  saveOnboardingProgress,
+  loadOnboardingProgress,
+  clearOnboardingProgress,
+} from '../src/utils/onboarding';
+import { ONBOARDING_ART } from '../src/components/OnboardingArt';
 
 const SLIDES = [
   {
-    icon: Sparkles,
     title: 'Welcome to Perfectly Good',
     body: 'Perfectly Good Food. Perfectly Low Prices. We connect you with great restaurants offering surplus meals, dine-in deals, and takeaway at unbeatable prices, so nothing goes to waste.',
   },
   {
-    icon: UtensilsCrossed,
     title: 'Surplus, Dine-In & Takeaway',
     body: 'Browse surplus meals at steep discounts, book a dine-in table, or order takeaway, all from one place. Fresh food, less waste, more savings.',
   },
   {
-    icon: Tag,
     title: 'Find Deals Near You',
     body: "Browse restaurants on the home screen and look for the Surplus tag. These are limited-time offers, grab them before they're gone.",
   },
   {
-    icon: ShoppingBag,
     title: 'Order in Seconds',
     body: 'Pick your items, choose a pickup window, and pay securely via Razorpay. Your order is confirmed instantly after payment.',
   },
   {
-    icon: KeyRound,
     title: 'Your Pickup Code',
     body: "After payment, you'll receive a unique 6-digit pickup code. Show it to the restaurant when you arrive, they'll scan it to complete your order.",
   },
   {
-    icon: LifeBuoy,
     title: "We're Here to Help",
     body: "Something went wrong? Tap Help & Support in your profile to raise an issue. We'll get back to you quickly on WhatsApp or email.",
   },
@@ -60,13 +53,44 @@ const SLIDES = [
 export default function Onboarding() {
   const router = useRouter();
   const { user } = useAuth();
+  const params = useLocalSearchParams<{ replay?: string }>();
+  const isReplay = params?.replay === '1';
   const { width } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
   const [index, setIndex] = useState(0);
   const isLast = index === SLIDES.length - 1;
 
+  // Progress memory: resume on the slide the customer stopped at (first run only).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!isReplay && user?.user_id) {
+        const saved = await loadOnboardingProgress(user.user_id);
+        if (!cancelled && saved > 0 && saved < SLIDES.length) {
+          setIndex(saved);
+          // jump to the saved slide once layout is ready
+          requestAnimationFrame(() => scrollRef.current?.scrollTo({ x: saved * width, animated: false }));
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.user_id, width, isReplay]);
+
   const finish = async () => {
+    if (isReplay) {
+      // Revisited from Profile: just return, don't touch flags/progress.
+      router.back();
+      return;
+    }
     await markOnboardingSeen(user?.user_id || '');
+    await clearOnboardingProgress(user?.user_id || '');
+    // End the intro by asking to enable location so nearby deals load right away.
+    try {
+      await Location.requestForegroundPermissionsAsync();
+    } catch {
+      // never block entry on a permission prompt
+    }
     router.replace('/(tabs)/home');
   };
 
@@ -78,11 +102,15 @@ export default function Onboarding() {
     const next = index + 1;
     scrollRef.current?.scrollTo({ x: next * width, animated: true });
     setIndex(next);
+    if (!isReplay && user?.user_id) saveOnboardingProgress(user.user_id, next);
   };
 
   const onScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const i = Math.round(e.nativeEvent.contentOffset.x / width);
-    if (i !== index) setIndex(i);
+    if (i !== index) {
+      setIndex(i);
+      if (!isReplay && user?.user_id) saveOnboardingProgress(user.user_id, i);
+    }
   };
 
   return (
@@ -103,13 +131,11 @@ export default function Onboarding() {
         scrollEventThrottle={16}
       >
         {SLIDES.map((slide, i) => {
-          const Icon = slide.icon;
+          const Art = ONBOARDING_ART[i];
           return (
             <View key={i} style={[styles.slide, { width }]} testID={`onboarding-slide-${i}`}>
-              <View style={styles.iconWrap}>
-                <View style={styles.iconInner}>
-                  <Icon size={64} color={COLORS.primary} strokeWidth={1.75} />
-                </View>
+              <View style={styles.artWrap}>
+                <Art />
               </View>
               <Text style={styles.title}>{slide.title}</Text>
               <Text style={styles.body}>{slide.body}</Text>
@@ -149,22 +175,10 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm },
   skipText: { fontSize: 15, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
   slide: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACING.xl },
-  iconWrap: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: COLORS.primary + '12',
+  artWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.xl,
-  },
-  iconInner: {
-    width: 116,
-    height: 116,
-    borderRadius: 58,
-    backgroundColor: COLORS.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
+    marginBottom: SPACING.lg,
   },
   title: {
     fontSize: 26,

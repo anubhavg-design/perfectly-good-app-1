@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy, Trash2 } from 'lucide-react-native';
+import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy, Trash2, Sparkles } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import { accountApi } from '../../src/api/client';
@@ -150,6 +150,24 @@ export default function ProfileScreen() {
             </View>
             <ChevronRight size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
+
+          {user.role === 'user' && (
+            <TouchableOpacity
+              testID="view-app-intro-btn"
+              style={styles.actionCard}
+              onPress={() => router.push('/onboarding?replay=1')}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.actionIcon, { backgroundColor: COLORS.primary + '15' }]}>
+                <Sparkles size={20} color={COLORS.primary} />
+              </View>
+              <View style={styles.actionContent}>
+                <Text style={styles.actionTitle}>View app intro</Text>
+                <Text style={styles.actionSubtitle}>Revisit the welcome walkthrough</Text>
+              </View>
+              <ChevronRight size={20} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             testID="privacy-policy-btn"

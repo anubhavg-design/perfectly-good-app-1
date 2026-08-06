@@ -121,7 +121,7 @@ export default function AuthScreen() {
               accessibilityLabel="Perfectly Good"
             />
             <Text style={styles.tagline}>
-              Perfectly Good Food.{'\n'}Perfectly Low Prices
+              Better Choices.{'\n'}Perfectly Good.
             </Text>
           </View>
 
