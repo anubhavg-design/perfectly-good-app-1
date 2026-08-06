@@ -232,25 +232,6 @@ export const vendorApi = {
   editMenuItem: (id: string, data: { image_url?: string; kcal?: number | null; protein?: number | null }) =>
     apiFetch(`/vendor/menu/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
-  bulkUploadImages: async (uri: string, name: string) => {
-    const token = await getToken();
-    const fd = new FormData();
-    if (Platform.OS === 'web') {
-      const blob = await (await fetch(uri)).blob();
-      fd.append('file', blob as any, name || 'images.zip');
-    } else {
-      fd.append('file', { uri, name: name || 'images.zip', type: 'application/zip' } as any);
-    }
-    const res = await fetch(`${API_BASE}/vendor/menu/bulk-images`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: fd,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new ApiError(res.status, data.detail || 'Upload failed');
-    return data;
-  },
-
   createDrop: (data: { menu_item_id: string; discounted_price: number; quantity_available: number; pickup_start_time: string; pickup_end_time: string; expiry?: string }) =>
     apiFetch('/vendor/drops', { method: 'POST', body: JSON.stringify(data) }),
 

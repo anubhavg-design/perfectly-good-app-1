@@ -1431,19 +1431,22 @@ _IMG_MIME = {
 _MAX_IMG_BYTES = 5 * 1024 * 1024  # 5 MB per image
 
 
-@api.post("/vendor/menu/bulk-images")
-async def vendor_bulk_upload_images(request: Request, file: UploadFile = File(...)):
-    """Vendor uploads a ZIP of images; each filename (minus extension) is matched
-    case-insensitively to an existing menu item's name and only the image is updated.
-    Never creates items or touches any other field."""
-    user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
-        raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+@api.post("/ops/vendors/{vendor_id}/bulk-images")
+async def ops_bulk_upload_images(vendor_id: str, request: Request, file: UploadFile = File(...)):
+    """Ops/Admin upload a ZIP of images for a specific vendor; each filename (minus
+    extension) is matched case-insensitively to an existing menu item's name and only
+    the image is updated. Never creates items or touches any other field."""
+    user = await require_permission(request, "manage_menu")
+    vendor = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor profile not found")
-
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    if user.get("role") == "operations" and vendor.get("assigned_ops") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="This vendor is not assigned to you")
     raw = await file.read()
+    return await _bulk_update_images(vendor, raw)
+
+
+async def _bulk_update_images(vendor: dict, raw: bytes) -> dict:
     try:
         zf = zipfile.ZipFile(io.BytesIO(raw))
     except zipfile.BadZipFile:

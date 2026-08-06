@@ -139,4 +139,5 @@ export const opsApi = {
   vendorPerformance: (id: string) => apiFetch(`/ops/vendors/${id}/performance`),
   parseMenuFile: (uri: string, name: string) => postFile('/ops/menu-import/parse-file', uri, name),
   bulkAddMenu: (id: string, items: any[]) => apiFetch(`/ops/vendors/${id}/menu/bulk`, { method: 'POST', body: JSON.stringify({ items }) }),
+  bulkUploadImages: (id: string, uri: string, name: string) => postFile(`/ops/vendors/${id}/bulk-images`, uri, name),
 };
