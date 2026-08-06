@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, Linking, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, Pencil, Plus, Copy, Trash2, MapPin, Phone, Mail, Store, ExternalLink, FileSpreadsheet } from 'lucide-react-native';
+import { ChevronLeft, Pencil, Plus, Copy, Trash2, MapPin, Phone, Mail, Store, ExternalLink, FileSpreadsheet, Images } from 'lucide-react-native';
 import { opsApi } from '../../../src/api/opsApi';
 import { C, SP, R, money, fmtDate, fmtDateTime, titleCase, hasPerm } from '../../../src/ops/theme';
 import { Card, Btn, Badge, Spinner, Sheet, ConfirmDialog, Toggle, DataTable, EmptyState } from '../../../src/ops/ui';
 import { VendorForm, MenuItemForm } from '../../../src/ops/forms';
 import { ImportMenu } from '../../../src/ops/ImportMenu';
+import { BulkImages } from '../../../src/ops/BulkImages';
 import { ExportButtons } from '../../../src/ops/ExportButtons';
 import { useAuth } from '../../../src/context/AuthContext';
 
@@ -28,6 +29,7 @@ export default function VendorProfile() {
   const [confirm, setConfirm] = useState<any>(null);
   const [note, setNote] = useState('');
   const [importOpen, setImportOpen] = useState(false);
+  const [bulkImgOpen, setBulkImgOpen] = useState(false);
   const [perf, setPerf] = useState<any>(null);
 
   const load = useCallback(async () => {
@@ -138,6 +140,7 @@ export default function VendorProfile() {
         {canMenu && (
           <View style={{ flexDirection: 'row', gap: SP.sm }}>
             <Btn title="Import Excel" icon={FileSpreadsheet} variant="secondary" small onPress={() => setImportOpen(true)} />
+            <Btn title="Upload Images" icon={Images} variant="secondary" small onPress={() => setBulkImgOpen(true)} />
             <Btn title="Add Item" icon={Plus} small onPress={() => setItemForm({})} />
           </View>
         )}
@@ -225,6 +228,8 @@ export default function VendorProfile() {
       </Sheet>
       <ImportMenu visible={importOpen} vendorId={id} onClose={() => setImportOpen(false)}
         onDone={async () => { setImportOpen(false); await load(); }} />
+      <BulkImages visible={bulkImgOpen} vendorId={id} itemNames={(v.menu_items || []).map((it: any) => it.name)}
+        onClose={() => setBulkImgOpen(false)} onDone={async () => { await load(); }} />
       <ConfirmDialog visible={!!confirm} title="Delete item?" danger loading={saving}
         message={`Delete "${confirm?.name}"? This cannot be undone.`} confirmLabel="Delete"
         onConfirm={deleteItem} onCancel={() => setConfirm(null)} />
