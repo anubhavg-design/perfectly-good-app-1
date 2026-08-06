@@ -23,6 +23,9 @@ import re
 import requests as http_requests
 import asyncio
 import smtplib
+import zipfile
+import base64
+import io
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -1419,6 +1422,74 @@ async def vendor_edit_menu_item(item_id: str, body: VendorMenuEditBody, request:
         raise HTTPException(status_code=404, detail="Item not found")
     updated = await db.menu_items.find_one({"menu_item_id": item_id}, {"_id": 0})
     return updated
+
+
+_IMG_MIME = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif", ".gif": "image/gif",
+}
+_MAX_IMG_BYTES = 5 * 1024 * 1024  # 5 MB per image
+
+
+@api.post("/vendor/menu/bulk-images")
+async def vendor_bulk_upload_images(request: Request, file: UploadFile = File(...)):
+    """Vendor uploads a ZIP of images; each filename (minus extension) is matched
+    case-insensitively to an existing menu item's name and only the image is updated.
+    Never creates items or touches any other field."""
+    user = await get_current_user(request)
+    if user["role"] not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+
+    raw = await file.read()
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="That file is not a valid ZIP archive.")
+
+    # Build a case-insensitive name -> item lookup for this vendor only.
+    items = await db.menu_items.find({"vendor_id": vendor["vendor_id"]}, {"_id": 0, "menu_item_id": 1, "name": 1}).to_list(2000)
+    by_name = {(i.get("name") or "").strip().lower(): i for i in items}
+
+    matched, skipped = [], []
+    seen_items: set = set()
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        fname = os.path.basename(info.filename)
+        if not fname or fname.startswith(".") or "__MACOSX" in info.filename:
+            continue
+        base, ext = os.path.splitext(fname)
+        ext = ext.lower()
+        if ext not in _IMG_MIME:
+            skipped.append({"filename": fname, "reason": "Not an image file"})
+            continue
+        key = base.strip().lower()
+        item = by_name.get(key)
+        if not item:
+            skipped.append({"filename": fname, "reason": "No matching menu item"})
+            logger.info(f"[bulk-images] skip '{fname}' — no matching item for vendor {vendor['vendor_id']}")
+            continue
+        data = zf.read(info)
+        if len(data) > _MAX_IMG_BYTES:
+            skipped.append({"filename": fname, "reason": "Image larger than 5 MB"})
+            continue
+        b64 = f"data:{_IMG_MIME[ext]};base64,{base64.b64encode(data).decode()}"
+        await db.menu_items.update_one(
+            {"menu_item_id": item["menu_item_id"], "vendor_id": vendor["vendor_id"]},
+            {"$set": {"image_url": b64, "updated_at": datetime.now(timezone.utc)}},
+        )
+        matched.append({"filename": fname, "item_name": item["name"]})
+        seen_items.add(item["menu_item_id"])
+
+    return {
+        "updated_count": len(seen_items),
+        "matched": matched,
+        "skipped": skipped,
+        "total_images": len(matched) + len(skipped),
+    }
 
 
 @api.put("/vendor/menu/{item_id}/toggle")

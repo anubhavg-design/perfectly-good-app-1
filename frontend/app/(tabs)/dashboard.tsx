@@ -5,8 +5,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X, KeyRound } from 'lucide-react-native';
+import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X, KeyRound, Images, Download, FileArchive } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import { vendorApi } from '../../src/api/client';
@@ -170,6 +173,52 @@ export default function DashboardScreen() {
   const [verifyOrder, setVerifyOrder] = useState<any>(null);
   const [verifyCode, setVerifyCode] = useState('');
   const [verifying, setVerifying] = useState(false);
+
+  // Bulk image upload (ZIP)
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkResult, setBulkResult] = useState<any>(null);
+
+  const downloadMenuNames = async () => {
+    if (!menu.length) { Alert.alert('No menu items', 'Your menu is empty right now.'); return; }
+    const text = 'Name your image files exactly like these menu items (extension e.g. .jpg):\n\n' +
+      menu.map((m: any) => m.name).join('\n');
+    try {
+      if (Platform.OS === 'web') {
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'menu-item-names.txt'; a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+      const uri = `${FileSystem.cacheDirectory}menu-item-names.txt`;
+      await FileSystem.writeAsStringAsync(uri, text);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: 'text/plain', dialogTitle: 'Menu item names' });
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Could not export names');
+    }
+  };
+
+  const pickAndUploadZip = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: ['application/zip', 'application/x-zip-compressed', 'multipart/x-zip'],
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const asset = res.assets[0];
+      setBulkUploading(true);
+      const result = await vendorApi.bulkUploadImages(asset.uri, asset.name || 'images.zip');
+      setBulkResult(result);
+      await loadData();
+    } catch (e: any) {
+      Alert.alert('Upload failed', e.message || 'Could not upload the ZIP file.');
+    } finally {
+      setBulkUploading(false);
+    }
+  };
 
   const submitVerify = async () => {
     if (!verifyOrder) return;
@@ -338,6 +387,32 @@ export default function DashboardScreen() {
       </View>
     );
   };
+
+  const renderMenuHeader = () => (
+    <View style={styles.bulkCard}>
+      <View style={styles.bulkRow}>
+        <Images size={18} color={COLORS.primary} />
+        <Text style={styles.bulkTitle}>Bulk Upload Images</Text>
+      </View>
+      <Text style={styles.bulkHelpTitle}>How to name your images</Text>
+      <Text style={styles.bulkHelp}>
+        Put your photos in a ZIP file. Name each image exactly like the menu item, e.g. "Chocolate Cake Slice.jpg".
+        Matching ignores caps. Only images are updated — nothing else changes.
+      </Text>
+      <TouchableOpacity testID="download-menu-names" style={styles.bulkLinkBtn} onPress={downloadMenuNames}>
+        <Download size={15} color={COLORS.primary} />
+        <Text style={styles.bulkLinkText}>Download my menu item names</Text>
+      </TouchableOpacity>
+      <TouchableOpacity testID="bulk-upload-zip" style={[styles.bulkUploadBtn, bulkUploading && { opacity: 0.7 }]} onPress={pickAndUploadZip} disabled={bulkUploading}>
+        {bulkUploading ? <ActivityIndicator color="#fff" /> : (
+          <>
+            <FileArchive size={18} color="#fff" />
+            <Text style={styles.bulkUploadText}>Upload ZIP of Images</Text>
+          </>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
 
   const renderOrderFilters = () => (
     <View style={styles.orderFilterRow}>
@@ -570,7 +645,7 @@ export default function DashboardScreen() {
           keyExtractor={(item: any) => item.menu_item_id || item.item_id || item.order_id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-          ListHeaderComponent={activeTab === 'orders' ? renderOrderFilters : undefined}
+          ListHeaderComponent={activeTab === 'orders' ? renderOrderFilters : activeTab === 'menu' ? renderMenuHeader : undefined}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -657,6 +732,43 @@ export default function DashboardScreen() {
           </View>
         </View>
       </Modal>
+      {/* Bulk image upload summary */}
+      <Modal visible={!!bulkResult} transparent animationType="slide" onRequestClose={() => setBulkResult(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Upload Summary</Text>
+              <TouchableOpacity testID="close-bulk-summary" onPress={() => setBulkResult(null)} style={styles.modalClose}>
+                <X size={22} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.summaryRow}>
+              <CheckCircle size={18} color={COLORS.success} />
+              <Text style={styles.summaryOk}>{bulkResult?.updated_count || 0} image(s) matched and updated</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <XCircle size={18} color={COLORS.textMuted} />
+              <Text style={styles.summarySkip}>{bulkResult?.skipped?.length || 0} skipped (no matching item)</Text>
+            </View>
+            {bulkResult?.skipped?.length ? (
+              <>
+                <Text style={styles.summarySubhead}>Fix these file names and re-upload:</Text>
+                <ScrollView style={{ maxHeight: 220 }}>
+                  {bulkResult.skipped.map((s: any, i: number) => (
+                    <View key={i} style={styles.skipItem}>
+                      <Text style={styles.skipName} numberOfLines={1}>{s.filename}</Text>
+                      <Text style={styles.skipReason}>{s.reason}</Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
+            <TouchableOpacity testID="bulk-summary-done" style={styles.saveBtn} onPress={() => setBulkResult(null)}>
+              <Text style={styles.saveBtnText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -739,4 +851,20 @@ const styles = StyleSheet.create({
   codeInput: { backgroundColor: COLORS.background, borderWidth: 1.5, borderColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 16, fontSize: 32, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary, textAlign: 'center', letterSpacing: 8, marginBottom: SPACING.md },
   modalCancelBtn: { paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   modalCancelText: { fontSize: 15, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  bulkCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.md, ...SHADOWS.small },
+  bulkRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: SPACING.xs },
+  bulkTitle: { fontSize: 16, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  bulkHelpTitle: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginTop: 4 },
+  bulkHelp: { fontSize: 12.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, lineHeight: 18, marginTop: 2 },
+  bulkLinkBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: SPACING.sm },
+  bulkLinkText: { fontSize: 13.5, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
+  bulkUploadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 13, marginTop: 4 },
+  bulkUploadText: { color: '#fff', fontSize: 15, fontFamily: 'Outfit_600SemiBold' },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+  summaryOk: { fontSize: 15, fontFamily: 'DMSans_700Bold', color: COLORS.success },
+  summarySkip: { fontSize: 15, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  summarySubhead: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginTop: SPACING.sm, marginBottom: 4 },
+  skipItem: { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
+  skipName: { fontSize: 13.5, fontFamily: 'DMSans_500Medium', color: COLORS.textPrimary },
+  skipReason: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted },
 });
