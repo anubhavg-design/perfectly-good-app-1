@@ -78,3 +78,10 @@
 - Non-image files skipped ("Not an image file"); unmatched names skipped ("No matching menu item"); >5MB skipped; invalid ZIP → 400.
 - Endpoint: POST /api/ops/vendors/{vendor_id}/bulk-images (perm manage_menu; operations restricted to assigned vendors). Component: src/ops/BulkImages.tsx. Includes a "Download menu item names" helper to name files correctly.
 - Verified: backend 8/8 pytest + Ops web frontend flow (iteration_18).
+
+## Mark as Sold Out (vendor) + daily reset (Aug 2026)
+- Vendor Dashboard → Menu tab: each item has a **"Sold Out"** toggle (reuses the `in_stock` field; in_stock=false == sold out). ON greys the card + shows a "SOLD OUT" badge and red caption "Sold out — hidden from customers (auto-resets at midnight)".
+- Customer app: sold-out items are hidden from `/api/drops`, `/api/restaurants/{id}` (both surplus + menu lists), and are NOT orderable — `POST /api/orders/create` returns 400 "This item is sold out" (before any Razorpay call) for surplus & takeaway/dine-in.
+- Endpoint: `PUT /api/vendor/menu/{item_id}/toggle` {in_stock} also stamps `sold_out_at` (IST date) when marking sold out; clears it when available.
+- **Daily reset**: APScheduler (AsyncIOScheduler, tz Asia/Kolkata) runs `reset_sold_out_items` at 00:00 IST → sets in_stock=true for all. On startup a catch-up run restores only items sold out on a PREVIOUS day (today's sold-outs survive a restart). Vendors can also manually re-enable anytime.
+- Verified: 13/13 backend pytest (test_sold_out.py) + vendor dashboard UI + reset/catch-up unit check.
