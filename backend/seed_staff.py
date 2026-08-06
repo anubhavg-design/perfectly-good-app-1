@@ -23,7 +23,6 @@ def gen_id(prefix: str) -> str:
 STAFF = [
     ("Anubhav", "anubhavg@perfectlygood.in", "Anubhavv", "admin"),
     ("Chaitanya", "chaitanya@perfectlygood.in", "123456789", "operations"),
-    ("Kavya Shetty", "kavyashetty975@gmail.com", "123456789", "operations"),
     ("Sandhya", "sas023261@gmail.com", "123456789", "operations"),
     ("Subhash Ramachandra", "subhashramachandraofficial@gmail.com", "123456789", "operations"),
 ]

@@ -20,7 +20,6 @@ API = f"{BASE_URL}/api"
 ADMIN = ("anubhavg@perfectlygood.in", "Anubhavv")
 OPS_ACCOUNTS = [
     ("chaitanya@perfectlygood.in", "123456789"),
-    ("kavyashetty975@gmail.com", "123456789"),
     ("sas023261@gmail.com", "123456789"),
     ("subhashramachandraofficial@gmail.com", "123456789"),
 ]

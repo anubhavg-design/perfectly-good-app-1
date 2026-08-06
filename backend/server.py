@@ -3050,16 +3050,12 @@ async def root():
 
 # ── Seed Data ───────────────────────────────────────────────────────────
 async def seed_data():
-    vendor_email = os.environ.get("VENDOR_EMAIL", "vendor@demo.com")
-    vendor_password = os.environ.get("VENDOR_PASSWORD", "vendor123")
-
     # ── Seed core staff accounts (idempotent). Runs on every startup so a fresh
     #    production Atlas DB gets the team accounts; existing accounts are left
     #    untouched (admin-changed passwords survive). ──
     staff_seed = [
         ("Anubhav", "anubhavg@perfectlygood.in", "Anubhavv", "admin"),
         ("Chaitanya", "chaitanya@perfectlygood.in", "123456789", "operations"),
-        ("Kavya Shetty", "kavyashetty975@gmail.com", "123456789", "operations"),
         ("Sandhya", "sas023261@gmail.com", "123456789", "operations"),
         ("Subhash Ramachandra", "subhashramachandraofficial@gmail.com", "123456789", "operations"),
     ]
@@ -3073,132 +3069,6 @@ async def seed_data():
                 "location": None, "created_at": datetime.now(timezone.utc),
             })
             logger.info(f"Staff seeded: {email} ({role})")
-
-    # Seed vendor user + vendor profile
-    existing_vendor = await db.users.find_one({"email": vendor_email})
-    if not existing_vendor:
-        vendor_user_id = gen_id("user")
-        vendor_id = gen_id("vendor")
-        await db.users.insert_one({
-            "user_id": vendor_user_id,
-            "email": vendor_email,
-            "name": "Demo Vendor",
-            "password_hash": hash_password(vendor_password),
-            "role": "vendor",
-            "picture": None,
-            "location": {"lat": 12.9716, "lon": 77.5946, "address": "MG Road, Bangalore"},
-            "created_at": datetime.now(timezone.utc),
-        })
-        await db.vendors.insert_one({
-            "vendor_id": vendor_id,
-            "user_id": vendor_user_id,
-            "name": "Green Leaf Bakery",
-            "category": "Bakery",
-            "email": vendor_email,
-            "location": {"lat": 12.9716, "lon": 77.5946, "address": "MG Road, Bangalore"},
-            "logo_url": "",
-        })
-        logger.info(f"Vendor seeded: {vendor_email}")
-
-        # Seed menu items for this vendor
-        menu_items = [
-            {"name": "Artisan Croissants (6-pack)", "description": "Freshly baked buttery croissants. Baked this morning!", "original_price": 300, "image_url": "https://images.unsplash.com/photo-1555507036-ab1f4038024a?w=600&h=400&fit=crop"},
-            {"name": "Sourdough Bread Loaf", "description": "Rustic sourdough with crispy crust. Made fresh daily!", "original_price": 250, "image_url": "https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&h=400&fit=crop"},
-            {"name": "Chocolate Cake Slice", "description": "Rich dark chocolate cake, perfectly moist.", "original_price": 180, "image_url": "https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=600&h=400&fit=crop"},
-        ]
-        for mi in menu_items:
-            mi_id = gen_id("menu")
-            await db.menu_items.insert_one({
-                "menu_item_id": mi_id,
-                "vendor_id": vendor_id,
-                **mi,
-            })
-
-        # Seed sample drops
-        drops_data = [
-            {"menu_idx": 0, "discounted_price": 120, "quantity": 8, "start": "17:00", "end": "20:00"},
-            {"menu_idx": 1, "discounted_price": 100, "quantity": 5, "start": "17:00", "end": "20:00"},
-            {"menu_idx": 2, "discounted_price": 70, "quantity": 4, "start": "18:00", "end": "21:00"},
-        ]
-        all_menu = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(10)
-        for dd in drops_data:
-            if dd["menu_idx"] < len(all_menu):
-                mi = all_menu[dd["menu_idx"]]
-                await db.drops.insert_one({
-                    "item_id": gen_id("item"),
-                    "vendor_id": vendor_id,
-                    "menu_item_id": mi["menu_item_id"],
-                    "name": mi["name"],
-                    "description": mi["description"],
-                    "original_price": mi["original_price"],
-                    "discounted_price": dd["discounted_price"],
-                    "quantity_available": dd["quantity"],
-                    "pickup_start_time": dd["start"],
-                    "pickup_end_time": dd["end"],
-                    "image_url": mi["image_url"],
-                    "is_active": True,
-                    "created_at": datetime.now(timezone.utc),
-                })
-        logger.info("Sample drops seeded")
-
-    # Seed a second vendor
-    vendor2_email = "spicegarden@demo.com"
-    existing_v2 = await db.users.find_one({"email": vendor2_email})
-    if not existing_v2:
-        v2_user_id = gen_id("user")
-        v2_id = gen_id("vendor")
-        await db.users.insert_one({
-            "user_id": v2_user_id,
-            "email": vendor2_email,
-            "name": "Spice Garden",
-            "password_hash": hash_password("vendor123"),
-            "role": "vendor",
-            "picture": None,
-            "location": {"lat": 12.9352, "lon": 77.6245, "address": "Koramangala, Bangalore"},
-            "created_at": datetime.now(timezone.utc),
-        })
-        await db.vendors.insert_one({
-            "vendor_id": v2_id,
-            "user_id": v2_user_id,
-            "name": "Spice Garden",
-            "category": "Restaurant",
-            "email": vendor2_email,
-            "location": {"lat": 12.9352, "lon": 77.6245, "address": "Koramangala, Bangalore"},
-            "logo_url": "",
-        })
-        menu2 = [
-            {"name": "Butter Chicken Thali", "description": "Full thali with butter chicken, dal, rice, naan and salad.", "original_price": 350, "image_url": "https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=600&h=400&fit=crop"},
-            {"name": "Paneer Tikka Wrap (2 pcs)", "description": "Smoky paneer tikka in fresh wraps.", "original_price": 220, "image_url": "https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=600&h=400&fit=crop"},
-            {"name": "Veg Biryani Bowl", "description": "Fragrant basmati rice with mixed vegetables.", "original_price": 280, "image_url": "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=600&h=400&fit=crop"},
-        ]
-        for mi in menu2:
-            mi_id = gen_id("menu")
-            await db.menu_items.insert_one({"menu_item_id": mi_id, "vendor_id": v2_id, **mi})
-        all_menu2 = await db.menu_items.find({"vendor_id": v2_id}, {"_id": 0}).to_list(10)
-        drops2 = [
-            {"idx": 0, "dp": 150, "qty": 10, "s": "18:00", "e": "21:00"},
-            {"idx": 1, "dp": 90, "qty": 6, "s": "18:00", "e": "21:00"},
-            {"idx": 2, "dp": 120, "qty": 8, "s": "17:30", "e": "20:30"},
-        ]
-        for dd in drops2:
-            if dd["idx"] < len(all_menu2):
-                mi = all_menu2[dd["idx"]]
-                await db.drops.insert_one({
-                    "item_id": gen_id("item"),
-                    "vendor_id": v2_id,
-                    "menu_item_id": mi["menu_item_id"],
-                    "name": mi["name"],
-                    "description": mi["description"],
-                    "original_price": mi["original_price"],
-                    "discounted_price": dd["dp"],
-                    "quantity_available": dd["qty"],
-                    "pickup_start_time": dd["s"],
-                    "pickup_end_time": dd["e"],
-                    "image_url": mi["image_url"],
-                    "is_active": True,
-                    "created_at": datetime.now(timezone.utc),
-                })
-        logger.info("Second vendor seeded")
 
     # Create indexes
     await db.users.create_index("email", unique=True)
