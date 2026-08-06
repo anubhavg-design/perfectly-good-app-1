@@ -71,3 +71,10 @@
 - **Storefront photo** (`vendors.storefront_image`, base64): uploaded by Ops/Admin in VendorForm; shown on vendor profile, Home restaurant card, restaurant hero (fallback logo_url).
 - **Vendor menu editing**: `PUT /vendor/menu/{item_id}` lets vendors edit ONLY image_url/kcal/protein of their own items (name/price/description Ops-controlled). Dashboard → Menu tab → Edit modal.
 - Checkout fee label renamed "Convenience Fee" → "Payment gateway fees".
+
+## Bulk Upload Images — Ops only (July 2026)
+- Ops/Admin can bulk update menu item photos from the Ops Vendor detail page (/ops/vendor/[id]) → "Upload Images" button (next to "Import Excel").
+- Flow: upload a ZIP of images. Each filename (minus extension) is matched case-insensitively to an existing menu item `name` for that vendor; only `image_url` (base64 data URI) + `updated_at` are updated. Never creates items or touches other fields.
+- Non-image files skipped ("Not an image file"); unmatched names skipped ("No matching menu item"); >5MB skipped; invalid ZIP → 400.
+- Endpoint: POST /api/ops/vendors/{vendor_id}/bulk-images (perm manage_menu; operations restricted to assigned vendors). Component: src/ops/BulkImages.tsx. Includes a "Download menu item names" helper to name files correctly.
+- Verified: backend 8/8 pytest + Ops web frontend flow (iteration_18).
