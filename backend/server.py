@@ -343,6 +343,7 @@ async def delete_my_account(request: Request):
     await db.support_requests.delete_many({"user_id": uid})
     await db.pending_orders.delete_many({"user_id": uid})
     await db.password_reset_tokens.delete_many({"user_id": uid})
+    await db.deal_alerts.delete_many({"user_id": uid})
     await db.orders.update_many({"user_id": uid}, {"$set": {"user_name": "Deleted user"}})
     # If this user owns a vendor profile, detach it (kept for records).
     await db.vendors.update_many({"user_id": uid}, {"$set": {"user_id": None}})

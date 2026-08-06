@@ -4,10 +4,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy, Trash2, Sparkles, X } from 'lucide-react-native';
+import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy, Sparkles, X, Settings } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
-import { accountApi } from '../../src/api/client';
+import GuestGate from '../../src/components/GuestGate';
 
 const VENDOR_CONTACT_EMAIL = 'chaitanya@perfectlygood.in';
 
@@ -65,31 +65,16 @@ export default function ProfileScreen() {
     ]);
   };
 
-  if (!user) return null;
-
-  const confirmDelete = () => {
-    Alert.alert(
-      'Delete Account',
-      'This permanently deletes your account and personal data. This cannot be undone. Continue?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await accountApi.deleteAccount();
-              Alert.alert('Account Deleted', 'Your account and data have been deleted.');
-              await logout().catch(() => {});
-              setTimeout(() => router.replace('/'), 100);
-            } catch (e: any) {
-              Alert.alert('Could not delete account', e.message || 'Please try again.');
-            }
-          },
-        },
-      ],
+  if (!user) {
+    return (
+      <GuestGate
+        testID="profile-guest-gate"
+        title="Sign in to your account"
+        message="Log in or create an account to manage your profile, orders and preferences."
+        next="/(tabs)/profile"
+      />
     );
-  };
+  }
 
   const roleLabel = user.role === 'admin' ? 'Administrator' : user.role === 'vendor' ? 'Vendor' : 'Food Rescuer';
   const memberSince = new Date(user.created_at).toLocaleDateString('en-IN', {
@@ -225,6 +210,22 @@ export default function ProfileScreen() {
             </View>
             <ChevronRight size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="settings-privacy-btn"
+            style={styles.actionCard}
+            onPress={() => router.push('/privacy-settings')}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#F1F5F9' }]}>
+              <Settings size={20} color={COLORS.textSecondary} />
+            </View>
+            <View style={styles.actionContent}>
+              <Text style={styles.actionTitle}>Settings & Privacy</Text>
+              <Text style={styles.actionSubtitle}>Manage data and delete account</Text>
+            </View>
+            <ChevronRight size={20} color={COLORS.textMuted} />
+          </TouchableOpacity>
         </View>
 
         {/* Logout */}
@@ -236,16 +237,6 @@ export default function ProfileScreen() {
         >
           <LogOut size={20} color={COLORS.error} />
           <Text style={styles.logoutText}>Log Out</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          testID="delete-account-btn"
-          style={styles.deleteBtn}
-          onPress={confirmDelete}
-          activeOpacity={0.8}
-        >
-          <Trash2 size={18} color={COLORS.textMuted} />
-          <Text style={styles.deleteText}>Delete Account</Text>
         </TouchableOpacity>
       </ScrollView>
 

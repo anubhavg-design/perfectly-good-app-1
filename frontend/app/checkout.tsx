@@ -9,6 +9,7 @@ import { WebView } from 'react-native-webview';
 import { ArrowLeft, Minus, Plus, ShieldCheck } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { ordersApi } from '../src/api/client';
+import { useAuth } from '../src/context/AuthContext';
 
 const RAZORPAY_KEY = process.env.EXPO_PUBLIC_RAZORPAY_KEY || 'rzp_test_SSfFeyx6ytVg0B';
 
@@ -24,10 +25,23 @@ export default function CheckoutScreen() {
     orderType: string;
   }>();
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [quantity, setQuantity] = useState(1);
   const [loading, setLoading] = useState(false);
   const [showRazorpay, setShowRazorpay] = useState(false);
   const [razorpayData, setRazorpayData] = useState<any>(null);
+
+  // Reserving an item requires an account. Guests are sent to the login screen
+  // and returned to this exact checkout afterwards to continue their reservation.
+  React.useEffect(() => {
+    if (authLoading || user) return;
+    const qs = Object.entries(params)
+      .filter(([, v]) => v != null && v !== '')
+      .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+      .join('&');
+    const nextUrl = `/checkout${qs ? `?${qs}` : ''}`;
+    router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
+  }, [user, authLoading]);
 
   const orderType = (params.orderType as string) || 'surplus';
   const ORDER_LABELS: Record<string, string> = { surplus: 'Surplus', takeaway: 'Takeaway', dine_in: 'Dine-in' };
@@ -185,6 +199,10 @@ export default function CheckoutScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {!user ? (
+        <View style={styles.loader}><ActivityIndicator size="large" color={COLORS.primary} /></View>
+      ) : (
+      <>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity testID="checkout-back-btn" onPress={() => router.back()} style={styles.headerBack}>
@@ -281,12 +299,15 @@ export default function CheckoutScreen() {
           )}
         </TouchableOpacity>
       </View>
+      </>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
+  loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   headerBack: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },

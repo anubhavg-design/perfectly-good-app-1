@@ -9,6 +9,7 @@ import { ShoppingBag, Clock, CheckCircle, XCircle, AlertCircle, RotateCcw, KeyRo
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { ordersApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
+import GuestGate from '../../src/components/GuestGate';
 
 const STATUS_CONFIG: Record<string, { color: string; icon: any; label: string }> = {
   reserved: { color: COLORS.primary, icon: Clock, label: 'Ready for Pickup' },
@@ -46,6 +47,7 @@ export default function OrdersScreen() {
   }, [user]);
 
   const loadOrders = useCallback(async () => {
+    if (!user) { setLoading(false); return; }
     try {
       const data = await ordersApi.userOrders();
       setOrders(data || []);
@@ -54,12 +56,12 @@ export default function OrdersScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useFocusEffect(
     useCallback(() => {
       loadOrders();
-    }, [])
+    }, [loadOrders])
   );
 
   const onRefresh = async () => {
@@ -172,33 +174,44 @@ export default function OrdersScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.title}>My Orders</Text>
-      </View>
-
-      {loading ? (
-        <View style={styles.loader}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
-      ) : (
-        <FlatList
-          testID="orders-list"
-          data={orders}
-          renderItem={renderOrder}
-          keyExtractor={(item) => item.order_id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <ShoppingBag size={48} color={COLORS.textMuted} />
-              <Text style={styles.emptyTitle}>No orders yet</Text>
-              <Text style={styles.emptySubtitle}>Browse the home feed to find surplus deals!</Text>
-            </View>
-          }
+      {!user ? (
+        <GuestGate
+          testID="orders-guest-gate"
+          title="Sign in to view your orders"
+          message="Log in to see your reservations, pickup codes and order history."
+          next="/(tabs)/orders"
         />
+      ) : (
+        <>
+          <View style={styles.header}>
+            <Text style={styles.title}>My Orders</Text>
+          </View>
+
+          {loading ? (
+            <View style={styles.loader}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+            </View>
+          ) : (
+            <FlatList
+              testID="orders-list"
+              data={orders}
+              renderItem={renderOrder}
+              keyExtractor={(item) => item.order_id}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
+              }
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <ShoppingBag size={48} color={COLORS.textMuted} />
+                  <Text style={styles.emptyTitle}>No orders yet</Text>
+                  <Text style={styles.emptySubtitle}>Browse the home feed to find surplus deals!</Text>
+                </View>
+              }
+            />
+          )}
+        </>
       )}
     </SafeAreaView>
   );

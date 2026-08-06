@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs } from 'expo-router';
 import { Home, ShoppingBag, User, LayoutDashboard } from 'lucide-react-native';
 import { COLORS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
@@ -7,15 +7,8 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 
 export default function TabLayout() {
   const { user, loading } = useAuth();
-  const router = useRouter();
 
-  React.useEffect(() => {
-    if (!loading && !user) {
-      router.replace('/');
-    }
-  }, [user, loading]);
-
-  if (loading || !user) {
+  if (loading) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={COLORS.primary} />
@@ -23,8 +16,8 @@ export default function TabLayout() {
     );
   }
 
-  const isVendor = user.role === 'vendor';
-  const showDashboard = user.role === 'vendor' || user.role === 'admin';
+  const isVendor = user?.role === 'vendor';
+  const showDashboard = user?.role === 'vendor' || user?.role === 'admin';
 
   return (
     <Tabs
