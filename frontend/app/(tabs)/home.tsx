@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
+import { useAuth } from '../../src/context/AuthContext';
 import * as Location from 'expo-location';
 
 // Default: Bangalore
@@ -35,6 +36,7 @@ function getDiscount(original: number, discounted: number) {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [drops, setDrops] = useState<any[]>([]);
   const [restaurants, setRestaurants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +47,10 @@ export default function HomeScreen() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
+
+  useEffect(() => {
+    if (user?.role === 'vendor') router.replace('/(tabs)/dashboard');
+  }, [user]);
 
   useEffect(() => {
     (async () => {

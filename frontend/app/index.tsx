@@ -32,7 +32,10 @@ export default function AuthScreen() {
   React.useEffect(() => {
     if (!loading && user) {
       const staff = ['admin', 'operations', 'customer_success', 'finance'];
-      router.replace(staff.includes((user as any).role) ? '/ops' : '/(tabs)/home');
+      const role = (user as any).role;
+      if (staff.includes(role)) router.replace('/ops');
+      else if (role === 'vendor') router.replace('/(tabs)/dashboard');
+      else router.replace('/(tabs)/home');
     }
   }, [user, loading]);
 

@@ -23,6 +23,7 @@ export default function TabLayout() {
     );
   }
 
+  const isVendor = user.role === 'vendor';
   const showDashboard = user.role === 'vendor' || user.role === 'admin';
 
   return (
@@ -49,16 +50,17 @@ export default function TabLayout() {
         },
       }}
     >
+      {/* Vendors cannot browse or place orders — hide the customer Home & Orders tabs */}
       <Tabs.Screen
         name="home"
-        options={{
+        options={isVendor ? { href: null } : {
           title: 'Home',
           tabBarIcon: ({ color, size }) => <Home size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="orders"
-        options={{
+        options={isVendor ? { href: null } : {
           title: 'Orders',
           tabBarIcon: ({ color, size }) => <ShoppingBag size={size} color={color} />,
         }}

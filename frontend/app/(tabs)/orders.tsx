@@ -4,10 +4,11 @@ import {
   ActivityIndicator, RefreshControl, Alert, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ShoppingBag, Clock, CheckCircle, XCircle, AlertCircle, RotateCcw, KeyRound, LifeBuoy } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { ordersApi } from '../../src/api/client';
+import { useAuth } from '../../src/context/AuthContext';
 
 const STATUS_CONFIG: Record<string, { color: string; icon: any; label: string }> = {
   reserved: { color: COLORS.primary, icon: Clock, label: 'Ready for Pickup' },
@@ -34,9 +35,15 @@ interface Order {
 const ORDER_TYPE_LABELS: Record<string, string> = { surplus: 'Surplus', takeaway: 'Takeaway', dine_in: 'Dine-in' };
 
 export default function OrdersScreen() {
+  const router = useRouter();
+  const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  React.useEffect(() => {
+    if (user?.role === 'vendor') router.replace('/(tabs)/dashboard');
+  }, [user]);
 
   const loadOrders = useCallback(async () => {
     try {
