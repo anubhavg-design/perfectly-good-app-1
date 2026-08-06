@@ -97,3 +97,9 @@
 - Custom Artwork: replaced lucide icons with branded green/white SVG illustrations per slide (src/components/OnboardingArt.tsx, react-native-svg): plate+leaf+smile, storefront+bag, map pin+% tag, phone+confirm check, pickup-code ticket, support chat+heart.
 - Location Prompt: on first-run "Get Started"/last-slide finish, requests foreground location permission (expo-location) before replacing to Home; never blocks entry (already declared in app.json).
 - Progress Memory: first-run slide index saved to AsyncStorage (pg_onboarding_progress_<userId>) on each advance; restored on mount; cleared on completion. Helpers in src/utils/onboarding.ts.
+
+## Onboarding polish round 2 (Aug 2026)
+- Deal Preview: added a 7th/final onboarding slide that fetches a live nearby surplus deal (dropsApi.list default Bengaluru coords, sort_by discount) and shows a tappable card (image, name, vendor, price, % off) with "Grab this deal" -> router.replace(/drop/{id}) (marks seen + clears progress first). Fallback message when no deals. "Get Started" still on this last slide. Dots/steps now show 7 (SLIDES.length + 1).
+- Personalized Welcome: slide 1 title becomes "Welcome, {firstName}!" from user.name (falls back to "Welcome to Perfectly Good").
+- Swipe Hint: animated "Swipe to explore »" pill on slide 1 (first-run only, not replay); hides once the customer advances past slide 1.
+- Animated Art: illustrations gently float via a looping RN Animated translateY (useNativeDriver off on web); swipe-hint pill has a subtle translateX bob.
