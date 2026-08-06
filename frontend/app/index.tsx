@@ -10,6 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -109,9 +110,12 @@ export default function AuthScreen() {
         >
           {/* Header */}
           <View style={styles.header}>
-            <View style={styles.logoRow}>
-              <Text style={styles.logoText}>Perfectly Good</Text>
-            </View>
+            <Image
+              source={require('../assets/images/splash-icon.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+              accessibilityLabel="Perfectly Good"
+            />
             <Text style={styles.tagline}>
               Perfectly Good Food.{'\n'}Perfectly Low Prices
             </Text>
@@ -269,20 +273,10 @@ const styles = StyleSheet.create({
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
   scrollContent: { flexGrow: 1, padding: SPACING.lg, justifyContent: 'center' },
   header: { marginBottom: SPACING.xl, alignItems: 'center' },
-  logoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.md },
-  logoIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: RADIUS.md,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: SPACING.sm,
-  },
-  logoText: {
-    fontSize: 28,
-    fontFamily: 'Outfit_700Bold',
-    color: COLORS.primary,
+  logoImage: {
+    width: 240,
+    height: 96,
+    marginBottom: SPACING.sm,
   },
   tagline: {
     fontSize: 16,
