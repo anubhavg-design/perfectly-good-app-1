@@ -181,6 +181,11 @@ export const dropsApi = {
   categories: () => apiFetch('/drops/categories'),
 };
 
+// Deal alerts opt-in ("notify me when deals go live")
+export const dealAlertsApi = {
+  optIn: (area?: string) => apiFetch('/deal-alerts', { method: 'POST', body: JSON.stringify({ area }) }),
+};
+
 // Restaurants endpoints (surplus + takeaway + dine-in)
 export const restaurantsApi = {
   list: (params: { lat?: number; lon?: number; search?: string; category?: string }) => {

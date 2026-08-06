@@ -17,7 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
-import { ArrowRight, ChevronsRight } from 'lucide-react-native';
+import { ArrowRight, ChevronsRight, Clock, Bell, ChevronRight, Check } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { useAuth } from '../src/context/AuthContext';
 import {
@@ -27,11 +27,25 @@ import {
   clearOnboardingProgress,
 } from '../src/utils/onboarding';
 import { ONBOARDING_ART, ArtFindDeals } from '../src/components/OnboardingArt';
-import { dropsApi } from '../src/api/client';
+import { dropsApi, dealAlertsApi } from '../src/api/client';
 
 // Bengaluru default so we can surface a nearby deal before location is granted.
 const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
+
+// Live "ends in Xh Ym" until the deal's pickup end time.
+function getTimeRemaining(endTime?: string): string {
+  if (!endTime) return '';
+  const now = new Date();
+  const [h, m] = endTime.split(':').map(Number);
+  const end = new Date(now);
+  end.setHours(h, m, 0, 0);
+  if (end <= now) end.setDate(end.getDate() + 1);
+  const diff = end.getTime() - now.getTime();
+  const hours = Math.floor(diff / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+}
 
 const SLIDES = [
   {
@@ -72,9 +86,13 @@ export default function Onboarding() {
   const { width } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
   const [index, setIndex] = useState(0);
-  const [deal, setDeal] = useState<any>(null);
+  const [deals, setDeals] = useState<any[]>([]);
+  const [dealIdx, setDealIdx] = useState(0);
   const [dealLoading, setDealLoading] = useState(true);
   const [showHint, setShowHint] = useState(!isReplay);
+  const [tick, setTick] = useState(0);
+  const [area, setArea] = useState('');
+  const [optedIn, setOptedIn] = useState(false);
   const isLast = index === TOTAL - 1;
 
   const firstName = (user?.name || '').trim().split(/\s+/)[0];
@@ -124,18 +142,48 @@ export default function Onboarding() {
     return () => loop.stop();
   }, [isReplay, hintAnim]);
 
-  // Fetch a live nearby surplus deal to preview on the final slide.
+  // Fetch top nearby surplus deals to preview on the final slide.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const list = await dropsApi.list({ lat: DEFAULT_LAT, lon: DEFAULT_LON, sort_by: 'discount' });
-        if (!cancelled) setDeal(Array.isArray(list) && list.length ? list[0] : null);
+        if (!cancelled) setDeals(Array.isArray(list) ? list.slice(0, 3) : []);
       } catch {
-        if (!cancelled) setDeal(null);
+        if (!cancelled) setDeals([]);
       } finally {
         if (!cancelled) setDealLoading(false);
       }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Rotate through the top picks so the last slide feels alive.
+  useEffect(() => {
+    if (deals.length < 2) return;
+    const id = setInterval(() => setDealIdx((i) => (i + 1) % deals.length), 4000);
+    return () => clearInterval(id);
+  }, [deals.length]);
+
+  // Refresh the countdown label each minute.
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Best-effort area name for the warm empty state (only if already granted).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const perm = await Location.getForegroundPermissionsAsync();
+        if (perm.status !== 'granted') return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+        const places = await Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        const p = places?.[0];
+        const name = p?.district || p?.subregion || p?.city || p?.region || '';
+        if (!cancelled && name) setArea(name);
+      } catch {}
     })();
     return () => { cancelled = true; };
   }, []);
@@ -164,6 +212,23 @@ export default function Onboarding() {
     router.replace(`/drop/${itemId}`);
   };
 
+  const seeAllDeals = async () => {
+    if (!isReplay) {
+      await markOnboardingSeen(user?.user_id || '');
+      await clearOnboardingProgress(user?.user_id || '');
+    }
+    router.replace('/(tabs)/home?focus=surplus');
+  };
+
+  const notifyMe = async () => {
+    setOptedIn(true);
+    try {
+      await dealAlertsApi.optIn(area || undefined);
+    } catch {
+      // opt-in is best-effort; keep the confirmed state either way
+    }
+  };
+
   const goTo = (i: number) => {
     scrollRef.current?.scrollTo({ x: i * width, animated: true });
     setIndex(i);
@@ -187,7 +252,13 @@ export default function Onboarding() {
 
   const floatY = floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -12] });
   const hintX = hintAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 10] });
-  const discount = deal && deal.original_price ? Math.round(((deal.original_price - deal.discounted_price) / deal.original_price) * 100) : 0;
+  const currentDeal = deals.length ? deals[dealIdx % deals.length] : null;
+  const discount = currentDeal && currentDeal.original_price
+    ? Math.round(((currentDeal.original_price - currentDeal.discounted_price) / currentDeal.original_price) * 100)
+    : 0;
+  const timeLeft = currentDeal ? getTimeRemaining(currentDeal.pickup_end_time) : '';
+  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+  tick; // referenced so the countdown recomputes each minute
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -231,29 +302,37 @@ export default function Onboarding() {
           {dealLoading ? (
             <>
               <ActivityIndicator size="large" color={COLORS.primary} />
-              <Text style={[styles.body, { marginTop: SPACING.md }]}>Finding a deal near you…</Text>
+              <Text style={[styles.body, { marginTop: SPACING.md }]}>Finding deals near you…</Text>
             </>
-          ) : deal ? (
+          ) : currentDeal ? (
             <>
-              <Text style={styles.title}>A deal waiting for you</Text>
-              <Text style={[styles.body, { marginBottom: SPACING.lg }]}>Here’s a live surplus deal nearby. Grab it to place your very first order.</Text>
-              <TouchableOpacity testID="onboarding-deal-card" activeOpacity={0.9} style={styles.dealCard} onPress={() => openDeal(deal.item_id)}>
+              <Text style={styles.title}>Deals waiting for you</Text>
+              <Text style={[styles.body, { marginBottom: SPACING.lg }]}>
+                {deals.length > 1 ? 'Top surplus picks nearby. Grab one to place your very first order.' : 'A live surplus deal nearby. Grab it to place your very first order.'}
+              </Text>
+              <TouchableOpacity testID="onboarding-deal-card" activeOpacity={0.9} style={styles.dealCard} onPress={() => openDeal(currentDeal.item_id)}>
                 <View style={styles.dealImageWrap}>
-                  {deal.image_url ? (
-                    <Image source={{ uri: deal.image_url }} style={styles.dealImage} />
+                  {currentDeal.image_url ? (
+                    <Image source={{ uri: currentDeal.image_url }} style={styles.dealImage} />
                   ) : (
                     <View style={[styles.dealImage, styles.dealImagePlaceholder]}><ArtFindDeals /></View>
                   )}
                   {discount > 0 ? (
                     <View style={styles.dealBadge}><Text style={styles.dealBadgeText}>{discount}% OFF</Text></View>
                   ) : null}
+                  {timeLeft ? (
+                    <View style={styles.dealTimer} testID="onboarding-deal-timer">
+                      <Clock size={12} color="#fff" />
+                      <Text style={styles.dealTimerText}>Ends in {timeLeft}</Text>
+                    </View>
+                  ) : null}
                 </View>
                 <View style={styles.dealInfo}>
-                  <Text style={styles.dealName} numberOfLines={1}>{deal.name}</Text>
-                  <Text style={styles.dealVendor} numberOfLines={1}>{deal.vendor_name}</Text>
+                  <Text style={styles.dealName} numberOfLines={1}>{currentDeal.name}</Text>
+                  <Text style={styles.dealVendor} numberOfLines={1}>{currentDeal.vendor_name}</Text>
                   <View style={styles.dealPriceRow}>
-                    <Text style={styles.dealPrice}>₹{deal.discounted_price}</Text>
-                    {deal.original_price ? <Text style={styles.dealStrike}>₹{deal.original_price}</Text> : null}
+                    <Text style={styles.dealPrice}>₹{currentDeal.discounted_price}</Text>
+                    {currentDeal.original_price ? <Text style={styles.dealStrike}>₹{currentDeal.original_price}</Text> : null}
                   </View>
                 </View>
                 <View style={styles.dealCta}>
@@ -261,14 +340,42 @@ export default function Onboarding() {
                   <ArrowRight size={18} color="#fff" />
                 </View>
               </TouchableOpacity>
+
+              {deals.length > 1 ? (
+                <View style={styles.dealDots}>
+                  {deals.map((_, i) => (
+                    <View key={i} style={[styles.dealDot, i === dealIdx % deals.length && styles.dealDotActive]} />
+                  ))}
+                </View>
+              ) : null}
+
+              <TouchableOpacity testID="onboarding-see-all-deals" style={styles.seeAll} onPress={seeAllDeals} activeOpacity={0.7}>
+                <Text style={styles.seeAllText}>See all deals</Text>
+                <ChevronRight size={16} color={COLORS.primary} />
+              </TouchableOpacity>
             </>
           ) : (
             <>
               <Animated.View style={[styles.artWrap, { transform: [{ translateY: floatY }] }]}>
                 <ArtFindDeals />
               </Animated.View>
-              <Text style={styles.title}>Fresh deals drop daily</Text>
-              <Text style={styles.body}>New surplus deals appear throughout the day. Open the home screen soon to grab your first one before it’s gone.</Text>
+              <Text style={styles.title}>{area ? `No live deals in ${area} yet` : 'No live deals just yet'}</Text>
+              <Text style={styles.body}>
+                {area
+                  ? `New surplus deals pop up in ${area} throughout the day. Want a heads-up the moment they go live?`
+                  : 'New surplus deals pop up throughout the day. Want a heads-up the moment they go live?'}
+              </Text>
+              {optedIn ? (
+                <View style={[styles.notifyBtn, styles.notifyDone]} testID="onboarding-notify-done">
+                  <Check size={18} color={COLORS.primary} />
+                  <Text style={styles.notifyDoneText}>You’re on the list! We’ll email you.</Text>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.notifyBtn} testID="onboarding-notify-me" onPress={notifyMe} activeOpacity={0.85}>
+                  <Bell size={18} color="#fff" />
+                  <Text style={styles.notifyText}>Notify me when deals go live</Text>
+                </TouchableOpacity>
+              )}
             </>
           )}
         </View>
@@ -329,6 +436,8 @@ const styles = StyleSheet.create({
   dealImagePlaceholder: { alignItems: 'center', justifyContent: 'center' },
   dealBadge: { position: 'absolute', top: 10, left: 10, backgroundColor: COLORS.accentUrgent, borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 4 },
   dealBadgeText: { color: '#fff', fontSize: 12, fontFamily: 'DMSans_700Bold' },
+  dealTimer: { position: 'absolute', bottom: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 4 },
+  dealTimerText: { color: '#fff', fontSize: 12, fontFamily: 'DMSans_700Bold' },
   dealInfo: { paddingHorizontal: SPACING.md, paddingTop: SPACING.md },
   dealName: { fontSize: 18, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
   dealVendor: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, marginTop: 2 },
@@ -337,4 +446,13 @@ const styles = StyleSheet.create({
   dealStrike: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textDecorationLine: 'line-through' },
   dealCta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, marginTop: SPACING.md, paddingVertical: 14 },
   dealCtaText: { color: '#fff', fontSize: 15, fontFamily: 'Outfit_600SemiBold' },
+  dealDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: SPACING.md },
+  dealDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: COLORS.border },
+  dealDotActive: { width: 18, backgroundColor: COLORS.primary },
+  seeAll: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2, marginTop: SPACING.md, paddingVertical: 6 },
+  seeAllText: { fontSize: 15, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
+  notifyBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 14, paddingHorizontal: SPACING.lg, marginTop: SPACING.lg },
+  notifyText: { color: '#fff', fontSize: 15, fontFamily: 'Outfit_600SemiBold' },
+  notifyDone: { backgroundColor: COLORS.primary + '15' },
+  notifyDoneText: { color: COLORS.primaryDark, fontSize: 14, fontFamily: 'DMSans_700Bold' },
 });

@@ -4,7 +4,7 @@ import {
   FlatList, Image, ActivityIndicator, RefreshControl, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
@@ -36,6 +36,8 @@ function getDiscount(original: number, discounted: number) {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ focus?: string }>();
+  const surplusOnly = params?.focus === 'surplus';
   const { user } = useAuth();
   const [drops, setDrops] = useState<any[]>([]);
   const [restaurants, setRestaurants] = useState<any[]>([]);
@@ -176,6 +178,17 @@ export default function HomeScreen() {
 
   const ListHeader = (
     <View>
+      {surplusOnly ? (
+        <View style={styles.surplusBanner} testID="surplus-only-banner">
+          <View style={styles.surplusBannerLeft}>
+            <Sparkles size={16} color={COLORS.primary} />
+            <Text style={styles.surplusBannerText}>Showing surplus deals only</Text>
+          </View>
+          <TouchableOpacity testID="clear-surplus-filter" onPress={() => router.replace('/(tabs)/home')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <X size={18} color={COLORS.primary} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
       {/* Header */}
       <View style={styles.headerSection}>
         <Text style={styles.greeting}>Perfectly Good</Text>
@@ -285,7 +298,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
         testID="restaurants-list"
-        data={restaurants}
+        data={surplusOnly ? restaurants.filter((r) => (r.surplus_count || 0) > 0) : restaurants}
         renderItem={renderRestaurant}
         keyExtractor={(item) => item.vendor_id}
         ListHeaderComponent={ListHeader}
@@ -307,6 +320,13 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
+  surplusBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: COLORS.primary + '12', marginHorizontal: SPACING.md, marginTop: SPACING.sm,
+    borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, paddingVertical: 10,
+  },
+  surplusBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  surplusBannerText: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.primaryDark },
   headerSection: { paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm },
   greeting: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: COLORS.primary },
   subGreeting: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },

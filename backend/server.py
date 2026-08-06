@@ -3199,6 +3199,32 @@ async def migrate_v2():
     logger.info("migrate_v2 complete")
 
 
+# ── Deal alerts opt-in (warm empty state on onboarding) ─────────────────
+class DealAlertBody(BaseModel):
+    area: Optional[str] = None
+
+
+@api.post("/deal-alerts")
+async def create_deal_alert(body: DealAlertBody, request: Request):
+    """Customer opts in to be notified (via email) when surplus deals go live."""
+    user = await get_current_user(request)
+    await db.deal_alerts.update_one(
+        {"user_id": user["user_id"]},
+        {
+            "$set": {
+                "user_id": user["user_id"],
+                "email": user.get("email"),
+                "name": user.get("name"),
+                "area": body.area,
+                "updated_at": datetime.now(timezone.utc),
+            },
+            "$setOnInsert": {"created_at": datetime.now(timezone.utc)},
+        },
+        upsert=True,
+    )
+    return {"message": "You're on the list"}
+
+
 # ── Sold-out daily reset (midnight IST) ─────────────────────────────────
 async def reset_sold_out_items(catch_up: bool = False):
     """Mark all sold-out items available again.

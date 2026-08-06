@@ -1,17 +1,52 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Modal, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy, Trash2, Sparkles } from 'lucide-react-native';
+import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy, Trash2, Sparkles, X } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import { accountApi } from '../../src/api/client';
 
+const VENDOR_CONTACT_EMAIL = 'chaitanya@perfectlygood.in';
+
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const [vendorModal, setVendorModal] = useState(false);
+  const [vOwner, setVOwner] = useState('');
+  const [vRestaurant, setVRestaurant] = useState('');
+  const [vCity, setVCity] = useState('');
+  const [vMobile, setVMobile] = useState('');
+
+  const sendVendorEmail = async () => {
+    if (!vOwner.trim() || !vRestaurant.trim() || !vCity.trim() || !vMobile.trim()) {
+      Alert.alert('Missing details', 'Please fill in all fields so we can reach you.');
+      return;
+    }
+    const subject = `Vendor Application - ${vRestaurant.trim()}`;
+    const body =
+      `Hi Perfectly Good Team,\n\n` +
+      `I'd like to list my restaurant on Perfectly Good. Here are my details:\n\n` +
+      `Owner Name: ${vOwner.trim()}\n` +
+      `Restaurant Name: ${vRestaurant.trim()}\n` +
+      `City: ${vCity.trim()}\n` +
+      `Mobile Number: ${vMobile.trim()}\n\n` +
+      `Please get in touch to help me get started.\n\nThanks!`;
+    const url = `mailto:${VENDOR_CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        Alert.alert('No email app found', `Please email us at ${VENDOR_CONTACT_EMAIL} with your details.`);
+        return;
+      }
+      await Linking.openURL(url);
+      setVendorModal(false);
+    } catch {
+      Alert.alert('Could not open email', `Please email us at ${VENDOR_CONTACT_EMAIL}.`);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert('Logout', 'Are you sure you want to log out?', [
@@ -126,13 +161,19 @@ export default function ProfileScreen() {
           )}
 
           {user.role === 'user' && (
-            <View style={styles.becomeVendorCard}>
+            <TouchableOpacity
+              testID="become-vendor-btn"
+              style={styles.becomeVendorCard}
+              onPress={() => setVendorModal(true)}
+              activeOpacity={0.85}
+            >
               <Store size={24} color={COLORS.primary} />
               <View style={styles.becomeVendorContent}>
                 <Text style={styles.becomeVendorTitle}>Become a Vendor</Text>
                 <Text style={styles.becomeVendorSub}>Contact us to list your surplus food</Text>
               </View>
-            </View>
+              <ChevronRight size={20} color={COLORS.primary} />
+            </TouchableOpacity>
           )}
 
           <TouchableOpacity
@@ -207,12 +248,67 @@ export default function ProfileScreen() {
           <Text style={styles.deleteText}>Delete Account</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Become a Vendor - collect details then open email */}
+      <Modal visible={vendorModal} transparent animationType="slide" onRequestClose={() => setVendorModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Become a Vendor</Text>
+              <TouchableOpacity testID="vendor-modal-close" onPress={() => setVendorModal(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <X size={22} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalSub}>Share a few details and we'll open your email to send them to our team.</Text>
+
+            <Text style={styles.fieldLabel}>Owner Name</Text>
+            <TextInput testID="vendor-owner-input" style={styles.input} value={vOwner} onChangeText={setVOwner}
+              placeholder="e.g. Ravi Kumar" placeholderTextColor={COLORS.textMuted} />
+
+            <Text style={styles.fieldLabel}>Restaurant Name</Text>
+            <TextInput testID="vendor-restaurant-input" style={styles.input} value={vRestaurant} onChangeText={setVRestaurant}
+              placeholder="e.g. Namma Tiffins" placeholderTextColor={COLORS.textMuted} />
+
+            <Text style={styles.fieldLabel}>City</Text>
+            <TextInput testID="vendor-city-input" style={styles.input} value={vCity} onChangeText={setVCity}
+              placeholder="e.g. Bengaluru" placeholderTextColor={COLORS.textMuted} />
+
+            <Text style={styles.fieldLabel}>Mobile Number</Text>
+            <TextInput testID="vendor-mobile-input" style={styles.input} value={vMobile} onChangeText={setVMobile}
+              placeholder="e.g. 9876543210" placeholderTextColor={COLORS.textMuted} keyboardType="phone-pad" />
+
+            <TouchableOpacity testID="vendor-send-email-btn" style={styles.modalSubmit} onPress={sendVendorEmail} activeOpacity={0.85}>
+              <Mail size={18} color="#fff" />
+              <Text style={styles.modalSubmitText}>Send Email</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  modalCard: {
+    backgroundColor: COLORS.surface, borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl,
+    padding: SPACING.lg, paddingBottom: SPACING.xl,
+  },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  modalSub: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 4, marginBottom: SPACING.md },
+  fieldLabel: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginBottom: 6, marginTop: SPACING.sm },
+  input: {
+    backgroundColor: COLORS.background, borderWidth: 1, borderColor: COLORS.border,
+    borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, height: 46,
+    fontSize: 15, fontFamily: 'DMSans_400Regular', color: COLORS.textPrimary,
+  },
+  modalSubmit: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 15, marginTop: SPACING.lg,
+  },
+  modalSubmitText: { color: '#fff', fontSize: 16, fontFamily: 'Outfit_600SemiBold' },
   scrollContent: { padding: SPACING.md, paddingBottom: SPACING.xxl },
   screenTitle: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary, marginBottom: SPACING.lg },
   profileCard: {

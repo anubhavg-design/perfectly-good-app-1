@@ -103,3 +103,12 @@
 - Personalized Welcome: slide 1 title becomes "Welcome, {firstName}!" from user.name (falls back to "Welcome to Perfectly Good").
 - Swipe Hint: animated "Swipe to explore »" pill on slide 1 (first-run only, not replay); hides once the customer advances past slide 1.
 - Animated Art: illustrations gently float via a looping RN Animated translateY (useNativeDriver off on web); swipe-hint pill has a subtle translateX bob.
+
+## Become-a-Vendor mail + onboarding deal enhancements (Aug 2026)
+- Become a Vendor (Profile, customers): now opens a modal collecting Owner Name, Restaurant Name, City, Mobile, then launches the mail app (Linking mailto) to chaitanya@perfectlygood.in with a prefilled subject/body. testIDs: become-vendor-btn, vendor-owner/restaurant/city/mobile-input, vendor-send-email-btn.
+- Onboarding final "deal" slide upgrades:
+  - Multiple Picks: fetches top 3 surplus deals (dropsApi.list sort_by=discount, slice 3) and auto-rotates every 4s with dots.
+  - Deal Countdown: live "Ends in Xh Ym" overlay on the card (getTimeRemaining from pickup_end_time; refresh each minute).
+  - Skip To Deals: "See all deals" -> router.replace('/(tabs)/home?focus=surplus'). Home reads focus param, shows a dismissible "Showing surplus deals only" banner and filters restaurants to surplus_count>0.
+  - Warm Empty State: when no deals, shows area name (best-effort reverse geocode if location already granted) + "Notify me when deals go live" -> POST /api/deal-alerts (backend upserts deal_alerts {user_id,email,name,area}); confirmed state after opt-in.
+- IMPORTANT (vendor persistence): vendors created via the Ops dashboard are stored in Mongo and are NOT affected by seeding; they persist. Only hardcoded seed/demo vendors were removed earlier.
