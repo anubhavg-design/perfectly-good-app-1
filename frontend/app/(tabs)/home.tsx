@@ -49,6 +49,13 @@ export default function HomeScreen() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
+  const [tick, setTick] = useState(0);
+
+  // Live countdown: refresh the surplus "time left" labels each minute.
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (user?.role === 'vendor') router.replace('/(tabs)/dashboard');
@@ -127,7 +134,7 @@ export default function HomeScreen() {
           {timeLeft ? (
             <View style={styles.surplusTimer}>
               <Clock size={11} color={COLORS.accentUrgent} />
-              <Text style={styles.surplusTimerText}>{timeLeft} left</Text>
+              <Text style={styles.surplusTimerText}>Ends in {timeLeft}</Text>
             </View>
           ) : null}
         </View>
@@ -264,6 +271,7 @@ export default function HomeScreen() {
         <FlatList
           testID="surplus-list"
           data={drops}
+          extraData={tick}
           renderItem={renderSurplusCard}
           keyExtractor={(item) => item.item_id}
           horizontal
