@@ -43,42 +43,10 @@ def loc(lat, lon, address):
 
 # (vendor_id, name, owner, category, service_type, location, [items])
 # item = (name, desc, original, surplus_price_or_None, qty_or_None, food_type, img_key)
-VENDORS = [
-    ("dv_namma", "Namma Tiffins", "Ravi Kumar", "South Indian", "both",
-     loc(12.9352, 77.6245, "5th Block, Koramangala, Bengaluru, Karnataka 560095"), [
-        ("Masala Dosa", "Crispy dosa with spiced potato filling & chutney", 120, 70, 5, "veg", "dosa"),
-        ("Idli Vada Combo", "Two idlis + medu vada with sambar", 90, 50, 8, "veg", "idli"),
-        ("Filter Coffee", "Authentic South Indian filter coffee", 40, None, None, "veg", "coffee"),
-        ("Ghee Pongal", "Comforting rice & lentil pongal with ghee", 110, None, None, "veg", "pongal"),
-     ]),
-    ("dv_slice", "Slice of Italy", "Maria Dsouza", "Italian", "both",
-     loc(12.9719, 77.6412, "100 Feet Road, Indiranagar, Bengaluru, Karnataka 560038"), [
-        ("Margherita Pizza", "Wood-fired pizza with basil & mozzarella", 350, 200, 4, "veg", "pizza"),
-        ("Pasta Alfredo", "Creamy white sauce penne pasta", 320, None, None, "veg", "pasta"),
-        ("Garlic Bread", "Toasted garlic bread with herbs", 150, 90, 6, "veg", "garlic"),
-        ("Tiramisu", "Classic coffee-soaked Italian dessert", 220, None, None, "veg", "tiramisu"),
-     ]),
-    ("dv_dragon", "Dragon Wok", "Li Wei", "Chinese", "both",
-     loc(12.9611, 77.6387, "80 Feet Road, Koramangala, Bengaluru, Karnataka 560034"), [
-        ("Veg Hakka Noodles", "Stir-fried noodles with veggies", 180, None, None, "veg", "noodles"),
-        ("Chilli Paneer", "Spicy indo-chinese paneer", 240, None, None, "veg", "paneer"),
-        ("Veg Fried Rice", "Wok-tossed fried rice", 170, None, None, "veg", "friedrice"),
-        ("Manchow Soup", "Hot & spicy soup with crispy noodles", 120, None, None, "veg", "soup"),
-     ]),
-    ("dv_burger", "Burger Barn", "Sam Fernandes", "Fast Food", "takeaway",
-     loc(12.9279, 77.6271, "6th Block, Koramangala, Bengaluru, Karnataka 560095"), [
-        ("Classic Veg Burger", "Crispy patty with lettuce & cheese", 150, 90, 10, "veg", "burger"),
-        ("Chicken Burger", "Juicy grilled chicken burger", 200, 120, 5, "non_veg", "chickenburger"),
-        ("Peri Peri Fries", "Crispy fries tossed in peri peri", 99, None, None, "veg", "fries"),
-        ("Cold Coffee", "Thick & creamy cold coffee", 120, None, None, "veg", "coldcoffee"),
-     ]),
-    ("dv_green", "The Green Bowl", "Ananya Rao", "Healthy", "dine_in",
-     loc(12.9784, 77.6408, "CMH Road, Indiranagar, Bengaluru, Karnataka 560038"), [
-        ("Quinoa Salad", "Protein-packed quinoa & veggie salad", 280, 160, 3, "veg", "salad"),
-        ("Buddha Bowl", "Wholesome grain bowl with hummus", 320, 190, 4, "veg", "bowl"),
-        ("Berry Smoothie", "Mixed berry & yogurt smoothie", 180, None, None, "veg", "smoothie"),
-     ]),
-]
+# NOTE (Aug 2026): the 5 dummy demo vendors were permanently removed at the
+# user's request. This list is intentionally empty so re-running this script
+# will not recreate them.
+VENDORS = []
 
 
 async def main():

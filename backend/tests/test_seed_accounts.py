@@ -15,8 +15,6 @@ BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://perfectly-good-bui
 
 SEEDED = [
     ("anubhavg@perfectlygood.in", "Anubhavv", "admin"),
-    ("chaitanya@perfectlygood.in", "123456789", "operations"),
-    ("sas023261@gmail.com", "123456789", "operations"),
     ("subhashramachandraofficial@gmail.com", "123456789", "operations"),
 ]
 
@@ -66,13 +64,13 @@ def test_admin_me_has_permissions(api, admin_token):
 def test_wrong_password_401(api):
     # user typed 123456 (screenshot bug) — must be rejected
     r = api.post(f"{BASE_URL}/api/auth/login",
-                 json={"email": "chaitanya@perfectlygood.in", "password": "123456"})
+                 json={"email": "subhashramachandraofficial@gmail.com", "password": "123456"})
     assert r.status_code == 401, f"expected 401, got {r.status_code} {r.text}"
 
 
 def test_operations_cannot_create_staff(api):
     r = api.post(f"{BASE_URL}/api/auth/login",
-                 json={"email": "chaitanya@perfectlygood.in", "password": "123456789"})
+                 json={"email": "subhashramachandraofficial@gmail.com", "password": "123456789"})
     assert r.status_code == 200
     ops_token = r.json()["access_token"]
 

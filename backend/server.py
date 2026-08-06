@@ -3055,8 +3055,6 @@ async def seed_data():
     #    untouched (admin-changed passwords survive). ──
     staff_seed = [
         ("Anubhav", "anubhavg@perfectlygood.in", "Anubhavv", "admin"),
-        ("Chaitanya", "chaitanya@perfectlygood.in", "123456789", "operations"),
-        ("Sandhya", "sas023261@gmail.com", "123456789", "operations"),
         ("Subhash Ramachandra", "subhashramachandraofficial@gmail.com", "123456789", "operations"),
     ]
     for name, email, pwd, role in staff_seed:
