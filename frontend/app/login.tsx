@@ -5,13 +5,14 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { useAuth } from '../src/context/AuthContext';
 import { hasSeenOnboarding } from '../src/utils/onboarding';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { Eye, EyeOff, X } from 'lucide-react-native';
 
 export default function LoginScreen() {
-  const { login, register } = useAuth();
+  const { login, register, appleLogin } = useAuth();
   const router = useRouter();
   const { next } = useLocalSearchParams<{ next?: string }>();
   const [isLogin, setIsLogin] = useState(true);
@@ -22,6 +23,13 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [appleAvailable, setAppleAvailable] = useState(false);
+
+  React.useEffect(() => {
+    if (Platform.OS === 'ios') {
+      AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => setAppleAvailable(false));
+    }
+  }, []);
 
   const routeForUser = async (u: any) => {
     const role = (u as any)?.role;
@@ -64,6 +72,34 @@ export default function LoginScreen() {
       } else {
         setError(err.message || 'Something went wrong');
       }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleApple = async () => {
+    setError('');
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      if (!credential.identityToken) {
+        setError('Apple Sign In failed. Please try again.');
+        return;
+      }
+      const fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+        .filter(Boolean)
+        .join(' ');
+      setSubmitting(true);
+      const u = await appleLogin(credential.identityToken, fullName || undefined, credential.email || undefined);
+      if (next) { router.replace(next as string); return; }
+      await routeForUser(u);
+    } catch (e: any) {
+      if (e?.code === 'ERR_REQUEST_CANCELED') return; // user cancelled
+      setError(e?.message || 'Apple Sign In failed. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -133,6 +169,24 @@ export default function LoginScreen() {
             <TouchableOpacity testID="auth-submit-btn" style={[styles.submitBtn, submitting && styles.submitBtnDisabled]} onPress={handleSubmit} disabled={submitting} activeOpacity={0.8}>
               {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>{isLogin ? 'Log In' : 'Create Account'}</Text>}
             </TouchableOpacity>
+
+            {appleAvailable && (
+              <>
+                <View style={styles.dividerRow}>
+                  <View style={styles.divider} />
+                  <Text style={styles.dividerText}>or</Text>
+                  <View style={styles.divider} />
+                </View>
+                <AppleAuthentication.AppleAuthenticationButton
+                  testID="apple-signin-btn"
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  cornerRadius={RADIUS.md}
+                  style={styles.appleBtn}
+                  onPress={handleApple}
+                />
+              </>
+            )}
           </View>
 
           <TouchableOpacity onPress={() => router.push('/privacy-policy')}>
@@ -170,5 +224,9 @@ const styles = StyleSheet.create({
   submitBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 14, alignItems: 'center', marginTop: SPACING.sm },
   submitBtnDisabled: { opacity: 0.7 },
   submitBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Outfit_600SemiBold' },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: SPACING.md },
+  divider: { flex: 1, height: 1, backgroundColor: COLORS.border },
+  dividerText: { marginHorizontal: SPACING.sm, fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textMuted },
+  appleBtn: { height: 48, width: '100%' },
   footerText: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textAlign: 'center', marginTop: SPACING.lg },
 });

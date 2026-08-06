@@ -23,6 +23,7 @@ export default function CheckoutScreen() {
     maxQty: string;
     imageUrl: string;
     orderType: string;
+    resume: string;
   }>();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -39,7 +40,7 @@ export default function CheckoutScreen() {
       .filter(([, v]) => v != null && v !== '')
       .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
       .join('&');
-    const nextUrl = `/checkout${qs ? `?${qs}` : ''}`;
+    const nextUrl = `/checkout${qs ? `?${qs}&resume=1` : '?resume=1'}`;
     router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
   }, [user, authLoading]);
 
@@ -73,6 +74,17 @@ export default function CheckoutScreen() {
       setLoading(false);
     }
   };
+
+  // Guest cart memory: if the user just signed in to complete a reservation,
+  // jump straight to payment instead of making them tap "Reserve" again.
+  const resumedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (user && params.resume === '1' && params.itemId && !resumedRef.current) {
+      resumedRef.current = true;
+      handleReserve();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, params.resume]);
 
   const getRazorpayHTML = () => {
     if (!razorpayData) return '';

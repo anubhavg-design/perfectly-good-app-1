@@ -130,6 +130,14 @@ export const authApi = {
     return res;
   },
 
+  apple: async (data: { identity_token: string; name?: string; email?: string }) => {
+    const res = await apiFetch('/auth/apple', { method: 'POST', body: JSON.stringify(data), skipAuth: true });
+    if (res?.access_token) {
+      await setToken(res.access_token);
+    }
+    return res;
+  },
+
   me: () => apiFetch('/auth/me'),
 
   logout: async () => {

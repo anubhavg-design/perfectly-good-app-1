@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
@@ -50,6 +50,7 @@ export default function HomeScreen() {
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
   const [tick, setTick] = useState(0);
+  const [showSignInHint, setShowSignInHint] = useState(true);
 
   // Live countdown: refresh the surplus "time left" labels each minute.
   useEffect(() => {
@@ -185,6 +186,20 @@ export default function HomeScreen() {
 
   const ListHeader = (
     <View>
+      {!user && showSignInHint ? (
+        <View style={styles.signInHint} testID="guest-signin-hint">
+          <Heart size={18} color={COLORS.primary} />
+          <View style={styles.signInHintTextWrap}>
+            <Text style={styles.signInHintText}>Sign in to save favourites & reorder faster</Text>
+          </View>
+          <TouchableOpacity testID="guest-signin-hint-cta" onPress={() => router.push('/login')}>
+            <Text style={styles.signInHintCta}>Sign in</Text>
+          </TouchableOpacity>
+          <TouchableOpacity testID="guest-signin-hint-dismiss" onPress={() => setShowSignInHint(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <X size={16} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
       {surplusOnly ? (
         <View style={styles.surplusBanner} testID="surplus-only-banner">
           <View style={styles.surplusBannerLeft}>
@@ -335,6 +350,14 @@ const styles = StyleSheet.create({
   },
   surplusBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   surplusBannerText: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.primaryDark },
+  signInHint: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: COLORS.primary + '10', marginHorizontal: SPACING.md, marginTop: SPACING.sm,
+    borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, paddingVertical: 10,
+  },
+  signInHintTextWrap: { flex: 1 },
+  signInHintText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  signInHintCta: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.primary, marginRight: 4 },
   headerSection: { paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm },
   greeting: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: COLORS.primary },
   subGreeting: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },

@@ -18,7 +18,8 @@
         "NSLocationWhenInUseUsageDescription": "Find surplus food deals near you",
         "NSCameraUsageDescription": "Take a photo to report a wrong item",
         "NSPhotoLibraryUsageDescription": "Upload photos for your menu items and reports"
-      }
+      },
+      "usesAppleSignIn": true
     },
     "android": {
       "versionCode": 110,
@@ -52,7 +53,8 @@
         }
       ],
       "expo-web-browser",
-      "expo-font"
+      "expo-font",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true

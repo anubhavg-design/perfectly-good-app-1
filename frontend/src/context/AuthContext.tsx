@@ -17,6 +17,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<User>;
+  appleLogin: (identityToken: string, name?: string, email?: string) => Promise<User>;
   register: (name: string, email: string, phone: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -81,6 +82,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return userData;
   };
 
+  const appleLogin = async (identityToken: string, name?: string, email?: string) => {
+    const userData = await authApi.apple({ identity_token: identityToken, name, email });
+    if (userData?.access_token) {
+      await setToken(userData.access_token);
+    }
+    setUser(userData);
+    await AsyncStorage.setItem('user', JSON.stringify(userData));
+    tryRegisterPush(userData.role);
+    return userData;
+  };
+
   const register = async (name: string, email: string, phone: string, password: string) => {
     const userData = await authApi.register({ name, email, phone, password });
     if (userData?.access_token) {
@@ -102,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, appleLogin, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

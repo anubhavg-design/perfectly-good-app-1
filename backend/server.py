@@ -327,6 +327,77 @@ async def login(body: LoginBody):
     response.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=86400, path="/")
     return response
 
+# ── Sign in with Apple (native iOS) ─────────────────────────────────────
+APPLE_ISSUER = "https://appleid.apple.com"
+APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
+# Must include the app bundle id AND host.exp.Exponent (Expo Go).
+APPLE_AUDIENCES = [a.strip() for a in os.environ.get(
+    "APPLE_AUDIENCES", "in.perfectlygood.app,host.exp.Exponent"
+).split(",") if a.strip()]
+_apple_jwks = jwt.PyJWKClient(APPLE_JWKS_URL)
+
+
+class AppleAuthBody(BaseModel):
+    identity_token: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+
+
+@api.post("/auth/apple")
+async def apple_auth(body: AppleAuthBody):
+    """Verify an Apple identity token against Apple's JWKS and issue our JWT.
+    Users are keyed by the Apple `sub` (name/email arrive only on first sign-in)."""
+    try:
+        signing_key = _apple_jwks.get_signing_key_from_jwt(body.identity_token)
+        claims = jwt.decode(
+            body.identity_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=APPLE_AUDIENCES,
+            issuer=APPLE_ISSUER,
+        )
+    except Exception as e:
+        logger.warning(f"Apple token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid Apple identity token")
+
+    apple_sub = claims.get("sub")
+    if not apple_sub:
+        raise HTTPException(status_code=401, detail="Invalid Apple identity token")
+
+    email = (body.email or claims.get("email") or "").strip().lower()
+    now = datetime.now(timezone.utc)
+
+    user = await db.users.find_one({"apple_sub": apple_sub}, {"_id": 0})
+    if not user and email:
+        user = await db.users.find_one({"email": email}, {"_id": 0})
+
+    if not user:
+        user_id = gen_id("user")
+        name = (body.name or "").strip() or (email.split("@")[0] if email else "Apple User")
+        user = {
+            "user_id": user_id,
+            "email": email or f"{apple_sub}@privaterelay.appleid.com",
+            "name": name,
+            "phone": "",
+            "role": "user",
+            "apple_sub": apple_sub,
+            "password_hash": None,
+            "permission_overrides": {},
+            "picture": None,
+            "location": None,
+            "created_at": now,
+        }
+        await db.users.insert_one(user)
+    elif not user.get("apple_sub"):
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"apple_sub": apple_sub}})
+
+    token = create_access_token(user["user_id"], user["email"])
+    resp = user_response(user)
+    resp["access_token"] = token
+    response = JSONResponse(content=resp)
+    response.set_cookie("access_token", token, httponly=True, samesite="lax", max_age=86400, path="/")
+    return response
+
 @api.get("/auth/me")
 async def auth_me(request: Request):
     user = await get_current_user(request)
