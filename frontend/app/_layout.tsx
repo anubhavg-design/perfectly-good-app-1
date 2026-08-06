@@ -48,6 +48,7 @@ export default function RootLayout() {
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="drop/[id]" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="restaurant/[id]" options={{ animation: 'slide_from_right' }} />

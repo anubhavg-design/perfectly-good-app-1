@@ -85,3 +85,8 @@
 - Endpoint: `PUT /api/vendor/menu/{item_id}/toggle` {in_stock} also stamps `sold_out_at` (IST date) when marking sold out; clears it when available.
 - **Daily reset**: APScheduler (AsyncIOScheduler, tz Asia/Kolkata) runs `reset_sold_out_items` at 00:00 IST → sets in_stock=true for all. On startup a catch-up run restores only items sold out on a PREVIOUS day (today's sold-outs survive a restart). Vendors can also manually re-enable anytime.
 - Verified: 13/13 backend pytest (test_sold_out.py) + vendor dashboard UI + reset/catch-up unit check.
+
+## First-login onboarding carousel (customer, Aug 2026)
+- After a customer's FIRST login/registration, a full-screen 6-slide onboarding carousel shows before Home; shown once only (device-local flag `pg_onboarded_v1_<userId>` in AsyncStorage via src/utils/onboarding.ts).
+- Screen: app/onboarding.tsx (registered in app/_layout.tsx, gestureEnabled:false). Green/white theme, lucide icons per slide (Sparkles, UtensilsCrossed, Tag, ShoppingBag, KeyRound, LifeBuoy). "Skip" top-right on every slide; next arrow on slides 1-5; "Get Started" on the last slide. Uses useWindowDimensions() for correct paging width (module-level Dimensions captured wrong web width).
+- Routing (app/index.tsx routeForUser): staff -> /ops, vendor -> /(tabs)/dashboard, customer -> /onboarding if not seen else /(tabs)/home. New registration always -> /onboarding. Finish/Skip marks seen + replaces to /(tabs)/home.

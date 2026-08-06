@@ -15,6 +15,7 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../src/context/AuthContext';
+import { hasSeenOnboarding } from '../src/utils/onboarding';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { Eye, EyeOff } from 'lucide-react-native';
 
@@ -30,13 +31,19 @@ export default function AuthScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  const routeForUser = async (u: any) => {
+    const role = (u as any)?.role;
+    const staff = ['admin', 'operations', 'customer_success', 'finance'];
+    if (role && staff.includes(role)) { router.replace('/ops'); return; }
+    if (role === 'vendor') { router.replace('/(tabs)/dashboard'); return; }
+    // Customer: show the onboarding carousel once on first login, then home.
+    const seen = await hasSeenOnboarding(u?.user_id);
+    router.replace(seen ? '/(tabs)/home' : '/onboarding');
+  };
+
   React.useEffect(() => {
     if (!loading && user) {
-      const staff = ['admin', 'operations', 'customer_success', 'finance'];
-      const role = (user as any).role;
-      if (staff.includes(role)) router.replace('/ops');
-      else if (role === 'vendor') router.replace('/(tabs)/dashboard');
-      else router.replace('/(tabs)/home');
+      routeForUser(user);
     }
   }, [user, loading]);
 
@@ -77,14 +84,11 @@ export default function AuthScreen() {
       const cleanPassword = password.trim();
       if (isLogin) {
         const u = await login(cleanEmail, cleanPassword);
-        const role = (u as any)?.role;
-        const staff = ['admin', 'operations', 'customer_success', 'finance'];
-        if (role && staff.includes(role)) router.replace('/ops');
-        else if (role === 'vendor') router.replace('/(tabs)/dashboard');
-        else router.replace('/(tabs)/home');
+        await routeForUser(u);
       } else {
         await register(name.trim(), cleanEmail, phone.trim(), cleanPassword);
-        router.replace('/(tabs)/home');
+        // Brand-new customer: always show onboarding first.
+        router.replace('/onboarding');
       }
     } catch (err: any) {
       if (err.message && err.message.includes('fetch')) {
