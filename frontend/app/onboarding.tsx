@@ -284,6 +284,7 @@ export default function Onboarding() {
               <Animated.View style={[styles.artWrap, { transform: [{ translateY: floatY }] }]}>
                 <Art />
               </Animated.View>
+              {i === 0 ? <Text style={styles.tagline}>Better Choices. Perfectly Good.</Text> : null}
               <Text style={styles.title}>{i === 0 ? welcomeTitle : slide.title}</Text>
               <Text style={styles.body}>{slide.body}</Text>
 
@@ -414,6 +415,7 @@ const styles = StyleSheet.create({
   slide: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACING.xl },
   artWrap: { alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.lg },
   title: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: COLORS.primaryDark, textAlign: 'center', marginBottom: SPACING.md },
+  tagline: { fontSize: 13, fontFamily: 'Outfit_600SemiBold', color: COLORS.primary, textAlign: 'center', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: SPACING.xs },
   body: { fontSize: 16, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, textAlign: 'center', lineHeight: 24 },
   hint: {
     flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: SPACING.xl,

@@ -576,7 +576,7 @@ async def list_drops(
     sort_by: Optional[str] = None,
 ):
     # Only items toggled available today, from active vendors
-    active_vendor_ids = await db.vendors.distinct("vendor_id", {"status": {"$ne": "inactive"}})
+    active_vendor_ids = await db.vendors.distinct("vendor_id", {"status": "active"})
     query: dict = {"available_today": True, "in_stock": {"$ne": False}, "vendor_id": {"$in": active_vendor_ids}}
     if search:
         query["$or"] = [
@@ -679,7 +679,7 @@ async def list_restaurants(
     search: Optional[str] = None,
     category: Optional[str] = None,
 ):
-    query: dict = {"status": {"$ne": "inactive"}}
+    query: dict = {"status": "active"}
     if category:
         query["category"] = category
     if search:
@@ -720,7 +720,7 @@ async def list_restaurants(
 @api.get("/restaurants/{vendor_id}")
 async def get_restaurant(vendor_id: str):
     v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
-    if not v or v.get("status") == "inactive":
+    if not v or v.get("status") != "active":
         raise HTTPException(status_code=404, detail="Restaurant not found")
     items = await db.menu_items.find({"vendor_id": vendor_id}, {"_id": 0}).to_list(1000)
     in_stock = lambda m: m.get("in_stock", True) is not False
@@ -777,6 +777,11 @@ async def create_order(body: CreateOrderBody, request: Request):
         disc = (vendor or {}).get("discount_percentage") or 0
         base_price = item.get("original_price") or item.get("discounted_price") or 0
         unit_price = round(base_price * (1 - disc / 100), 2)
+
+    # Vendor must be Active (admin-approved) to receive orders.
+    _ov = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
+    if not _ov or _ov.get("status") != "active":
+        raise HTTPException(status_code=400, detail="This restaurant is not currently accepting orders.")
 
     cfg = await get_settings_doc()
     subtotal = round(unit_price * body.quantity, 2)
@@ -1431,6 +1436,9 @@ async def create_vendor_drop(body: CreateDropBody, request: Request):
     if not menu_item:
         raise HTTPException(status_code=404, detail="Menu item not found")
 
+    if vendor.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Your account must be approved before you can list surplus deals.")
+
     # Surplus listings must be at least 30% off the regular menu (dine-in) price
     op = menu_item.get("original_price") or 0
     if op > 0 and body.discounted_price > round(op * 0.7, 2):
@@ -1465,6 +1473,10 @@ async def toggle_vendor_drop(item_id: str, body: ToggleDropBody, request: Reques
     user = await get_current_user(request)
     if user["role"] not in ("vendor", "admin"):
         raise HTTPException(status_code=403, detail="Not a vendor")
+    if body.is_active:
+        vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if not vendor or vendor.get("status") != "active":
+            raise HTTPException(status_code=403, detail="Your account must be approved before you can go live.")
     result = await db.menu_items.update_one({"menu_item_id": item_id}, {"$set": {"available_today": body.is_active, "updated_at": datetime.now(timezone.utc)}})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -1999,7 +2011,7 @@ class OpsVendorBody(BaseModel):
     service_type: Optional[str] = "both"
     pickup_start_time: Optional[str] = "18:00"
     pickup_end_time: Optional[str] = "21:00"
-    status: Optional[str] = "active"
+    status: Optional[str] = "draft"
     assigned_ops: Optional[str] = ""
     discount_percentage: Optional[float] = 0
     storefront_image: Optional[str] = ""
@@ -2196,7 +2208,7 @@ async def ops_create_vendor(body: OpsVendorBody, request: Request):
         "full_address": body.full_address or "", "maps_link": body.maps_link or "",
         "location": location, "logo_url": "", "service_type": body.service_type or "both",
         "pickup_start_time": body.pickup_start_time or "18:00", "pickup_end_time": body.pickup_end_time or "21:00",
-        "status": body.status or "active", "assigned_ops": assigned,
+        "status": body.status or "draft", "assigned_ops": assigned,
         "discount_percentage": max(0.0, min(float(body.discount_percentage or 0), 90.0)),
         "storefront_image": body.storefront_image or "",
         "notes": [], "created_at": now, "updated_at": now, "last_order_date": None,
@@ -2284,12 +2296,399 @@ async def ops_update_vendor(vendor_id: str, body: OpsVendorBody, request: Reques
 
 @api.put("/ops/vendors/{vendor_id}/status")
 async def ops_vendor_status(vendor_id: str, body: dict, request: Request):
-    await require_permission(request, "manage_vendors")
+    user = await require_permission(request, "manage_vendors")
     status = body.get("status", "active")
+    if status == "active" and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin can activate a vendor.")
     result = await db.vendors.update_one({"vendor_id": vendor_id}, {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return {"message": "Status updated", "status": status}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  VENDOR COMPLIANCE, VERIFICATION & AGREEMENT
+# ══════════════════════════════════════════════════════════════════════════
+
+VENDOR_STATUSES = ["draft", "pending_verification", "active", "rejected", "suspended"]
+
+_AGREEMENT_TEXT = """VENDOR AGREEMENT
+Perfectly Good
+Prajjval Ventures Private Limited
+Office No. 1190/1, 4th Floor, HSR Layout, Sector 3, 22nd Cross Road. Bengaluru 560102
+
+Effective Date: The date on which the Vendor electronically accepts this Agreement through the Perfectly Good Vendor Compliance & Agreement Form.
+
+This Vendor Agreement (\u201cAgreement\u201d) is entered into between:
+Prajjval Ventures Private Limited, operating the Perfectly Good surplus food platform, having its registered office at Office No. 1190/1, 4th Floor, HSR Layout, Sector 3, 22nd Cross Road. Bengaluru 560102 (\u201cPlatform\u201d, \u201cwe\u201d, \u201cus\u201d or \u201cour\u201d), and
+Any food business operator that completes the Perfectly Good Vendor Compliance & Agreement Form and electronically accepts this Agreement (\u201cVendor\u201d, \u201cyou\u201d or \u201cyour\u201d).
+The Platform and the Vendor are individually referred to as a \u201cParty\u201d and collectively as the \u201cParties\u201d.
+
+1. Purpose
+1.1 The Platform operates a marketplace that connects customers with food business operators offering surplus, unsold or excess food at discounted prices, available for dine-in, takeaway or both, depending on the format selected by the Vendor during onboarding.
+1.2 This Agreement sets out the terms on which the Vendor may list, prepare, package, hand over or serve food through the Platform.
+
+2. Vendor Obligations
+2.1 The Vendor shall maintain a valid FSSAI licence and all licences, registrations and permits required under applicable laws to prepare and sell food in India.
+2.2 The Vendor shall ensure that all food listed on the Platform is fit for human consumption and prepared, stored, handled and packaged in accordance with the Food Safety and Standards Act, 2006 and all applicable rules and regulations.
+2.3 The Vendor shall accurately disclose preparation time, best before or use by details and known allergens for every listed item.
+2.4 For dine-in orders, the Vendor shall maintain hygienic seating and service areas in compliance with applicable health and safety requirements.
+2.5 For takeaway orders, the Vendor shall use suitable food-grade packaging to ensure the food remains safe until the disclosed consumption period.
+2.6 The Vendor shall not list spoiled, expired, contaminated or otherwise unsafe food.
+2.7 The Vendor shall cooperate with the Platform during investigations relating to customer complaints and shall provide any requested records, photographs or other relevant information within twenty-four (24) hours of request.
+
+3. Liability for Food Quality and Safety
+3.1 The Vendor is solely responsible for the quality, safety and fitness for consumption of all food listed, prepared, packaged or served through the Platform.
+3.2 Where the Platform determines, after reviewing a complaint, that the issue originated from the food supplied by the Vendor, the Vendor shall bear full responsibility for any refund, replacement, compensation, regulatory action, legal claim or other liability arising from that issue.
+3.3 The Platform\u2019s determination regarding responsibility under this Agreement shall be final for the purpose of allocating liability between the Parties.
+3.4 The Platform operates solely as a technology marketplace connecting customers with Vendors. The Platform does not prepare, cook, package, store or inspect food before it reaches customers and does not guarantee the quality or safety of any food listed by Vendors.
+3.5 The Platform shall not be liable for any illness, injury, loss, damage or claim arising from food supplied by the Vendor where the issue relates to the quality, safety or suitability of the food.
+
+4. Indemnity
+4.1 The Vendor agrees to indemnify and hold harmless the Platform, its directors, officers, employees and representatives against all claims, losses, damages, liabilities, costs and legal expenses arising from:
+- unsafe or non-compliant food supplied by the Vendor;
+- any breach of this Agreement by the Vendor;
+- any claim by a customer, regulator or third party relating to food supplied by the Vendor.
+
+5. Listings, Orders and Payments
+5.1 The Vendor shall ensure that all listings accurately state pricing, quantity, availability and fulfilment format.
+5.2 The Platform shall remit payments for completed and undisputed orders in accordance with the payout schedule and commission structure communicated during onboarding.
+5.3 Any refunds or compensation payable due to Vendor-related issues may be deducted from future payouts or recovered separately if necessary.
+
+6. Complaint Investigation
+6.1 The Platform may investigate complaints using customer feedback, photographs, timestamps, order details and any other available evidence.
+6.2 The Vendor shall be given a reasonable opportunity to provide its explanation and supporting evidence before a decision is made.
+6.3 If the Platform determines that the complaint resulted from the Vendor\u2019s food, liability shall be allocated in accordance with this Agreement.
+
+7. Term and Termination
+7.1 This Agreement commences on the Effective Date and continues until terminated.
+7.2 Either Party may terminate this Agreement by providing thirty (30) days\u2019 written notice.
+7.3 The Platform may suspend or terminate the Vendor immediately if the Vendor repeatedly supplies unsafe food or no longer maintains the licences required by law.
+7.4 Termination shall not affect any rights or liabilities that accrued before termination.
+
+8. Representations and Warranties
+The Vendor represents and warrants that:
+- it is legally authorised to enter into this Agreement;
+- it holds all licences required by law;
+- all information submitted during onboarding is accurate and complete;
+- all food supplied through the Platform complies with applicable laws and food safety standards.
+
+9. Independent Contractor
+Nothing in this Agreement creates a partnership, joint venture, employment or agency relationship. The Vendor remains an independent business and is solely responsible for its employees, operations and food preparation.
+
+10. Confidentiality
+Each Party shall keep confidential all non-public business, operational and commercial information received from the other Party and shall use such information only for purposes relating to this Agreement.
+
+11. Governing Law
+This Agreement shall be governed by the laws of India. The courts at Bengaluru, Karnataka, India shall have exclusive jurisdiction over any dispute arising out of or relating to this Agreement.
+
+12. General
+12.1 This Agreement constitutes the complete agreement between the Parties and supersedes all previous discussions relating to its subject matter.
+12.2 Any amendment shall be effective only if made in writing by the Platform.
+12.3 If any provision is held invalid or unenforceable, the remaining provisions shall remain in full force and effect.
+12.4 The Vendor may not assign or transfer its rights or obligations under this Agreement without the prior written consent of the Platform.
+
+Electronic Acceptance
+By completing and submitting the Perfectly Good Vendor Compliance & Agreement Form, the Vendor confirms that:
+- it has read and understood this Agreement in full;
+- it is authorised to enter into this Agreement on behalf of the business;
+- all information and documents submitted are true, accurate and complete;
+- it agrees to be legally bound by the terms of this Agreement.
+The Vendor acknowledges that typing its full legal name as an electronic signature and submitting the onboarding form constitutes a valid electronic acceptance of this Agreement. The submission timestamp recorded by Perfectly Good shall constitute the Effective Date of this Agreement.
+
+For Perfectly Good
+Company: Prajjval Ventures Private Limited
+Brand: Perfectly Good
+Authorised Signatory: Anubhav Giri
+Designation: Founder"""
+
+
+async def get_agreement_doc() -> dict:
+    doc = await db.settings.find_one({"_id": "vendor_agreement"})
+    if not doc:
+        doc = {"_id": "vendor_agreement", "version": "1.0", "content": _AGREEMENT_TEXT,
+               "pdf_url": "", "updated_at": datetime.now(timezone.utc), "updated_by": "System"}
+        await db.settings.insert_one(doc)
+    doc.pop("_id", None)
+    if isinstance(doc.get("updated_at"), datetime):
+        doc["updated_at"] = doc["updated_at"].isoformat()
+    return doc
+
+
+def _iso(dt):
+    return dt.isoformat() if isinstance(dt, datetime) else dt
+
+
+def _cert(c):
+    if not c or not isinstance(c, dict):
+        return None
+    if not (c.get("data") or ""):
+        return None
+    return {"name": c.get("name", "document"), "mime": c.get("mime", ""), "data": c.get("data")}
+
+
+class SaveVerificationBody(BaseModel):
+    business_name: Optional[str] = ""
+    authorised_representative: Optional[str] = ""
+    business_email: Optional[str] = ""
+    gst_status: Optional[str] = ""
+    gst_number: Optional[str] = ""
+    gst_certificate: Optional[dict] = None
+    fssai_number: Optional[str] = ""
+    fssai_certificate: Optional[dict] = None
+    bank_account_holder: Optional[str] = ""
+    bank_account_number: Optional[str] = ""
+    bank_ifsc: Optional[str] = ""
+    bank_name: Optional[str] = ""
+
+
+class SubmitVerificationBody(SaveVerificationBody):
+    agreement_version: Optional[str] = ""
+    signature_full_name: Optional[str] = ""
+    signature_designation: Optional[str] = ""
+    agreed_agreement: Optional[bool] = False
+    decl_authorised: Optional[bool] = False
+    decl_accurate: Optional[bool] = False
+    decl_agreement: Optional[bool] = False
+    decl_food_safety: Optional[bool] = False
+
+
+async def _get_vendor_for_user(request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ("vendor", "admin"):
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    return user, vendor
+
+
+def _apply_verification(existing: dict, body: SaveVerificationBody) -> dict:
+    existing = existing or {}
+    return {
+        "business_name": body.business_name or "",
+        "authorised_representative": body.authorised_representative or "",
+        "business_email": (body.business_email or "").strip(),
+        "gst_status": body.gst_status or "",
+        "gst_number": (body.gst_number or "").strip(),
+        "gst_certificate": _cert(body.gst_certificate) or existing.get("gst_certificate"),
+        "fssai_number": (body.fssai_number or "").strip(),
+        "fssai_certificate": _cert(body.fssai_certificate) or existing.get("fssai_certificate"),
+        "bank_account_holder": body.bank_account_holder or "",
+        "bank_account_number": (body.bank_account_number or "").strip(),
+        "bank_ifsc": (body.bank_ifsc or "").strip().upper(),
+        "bank_name": body.bank_name or "",
+        "agreement": existing.get("agreement"),
+        "declarations": existing.get("declarations"),
+    }
+
+
+@api.get("/vendor/verification")
+async def get_vendor_verification(request: Request):
+    user, vendor = await _get_vendor_for_user(request)
+    return {
+        "status": vendor.get("status", "draft"),
+        "rejection_reason": vendor.get("rejection_reason", ""),
+        "locked": vendor.get("status") in ("pending_verification", "active", "suspended"),
+        "verification": vendor.get("verification") or {},
+        "agreement": await get_agreement_doc(),
+        "submitted_at": _iso(vendor.get("verification_submitted_at")),
+    }
+
+
+@api.get("/vendor/agreement")
+async def vendor_get_agreement(request: Request):
+    await get_current_user(request)
+    return await get_agreement_doc()
+
+
+@api.put("/vendor/verification")
+async def save_vendor_verification(body: SaveVerificationBody, request: Request):
+    user, vendor = await _get_vendor_for_user(request)
+    if vendor.get("status") in ("pending_verification", "active", "suspended"):
+        raise HTTPException(status_code=400, detail="Verification is locked and cannot be edited right now.")
+    v = _apply_verification(vendor.get("verification") or {}, body)
+    await db.vendors.update_one({"vendor_id": vendor["vendor_id"]}, {"$set": {"verification": v, "updated_at": datetime.now(timezone.utc)}})
+    return {"message": "Saved", "verification": v}
+
+
+def _validate_verification(v: dict, body: SubmitVerificationBody):
+    errors = []
+    if not (v.get("business_name") or "").strip(): errors.append("Business name")
+    if not (v.get("authorised_representative") or "").strip(): errors.append("Authorised representative")
+    if not (v.get("business_email") or "").strip(): errors.append("Business email")
+    gst_status = v.get("gst_status")
+    if gst_status not in ("registered", "not_registered"):
+        errors.append("GST status")
+    elif gst_status == "registered":
+        if not (v.get("gst_number") or "").strip(): errors.append("GST number")
+        if not v.get("gst_certificate"): errors.append("GST certificate")
+    if not (v.get("fssai_number") or "").strip(): errors.append("FSSAI licence number")
+    if not v.get("fssai_certificate"): errors.append("FSSAI certificate")
+    if not (v.get("bank_account_holder") or "").strip(): errors.append("Account holder name")
+    if not (v.get("bank_account_number") or "").strip(): errors.append("Account number")
+    if not (v.get("bank_ifsc") or "").strip(): errors.append("IFSC code")
+    if not (v.get("bank_name") or "").strip(): errors.append("Bank name")
+    if not (body.signature_full_name or "").strip(): errors.append("Signature full legal name")
+    if not (body.signature_designation or "").strip(): errors.append("Signature designation")
+    if not (body.agreed_agreement and body.decl_authorised and body.decl_accurate and body.decl_agreement and body.decl_food_safety):
+        errors.append("All agreement checkboxes and declarations")
+    return errors
+
+
+@api.post("/vendor/verification/submit")
+async def submit_vendor_verification(body: SubmitVerificationBody, request: Request):
+    user, vendor = await _get_vendor_for_user(request)
+    if vendor.get("status") in ("pending_verification", "active", "suspended"):
+        raise HTTPException(status_code=400, detail="Your verification is already submitted or your account is active.")
+    v = _apply_verification(vendor.get("verification") or {}, body)
+    errors = _validate_verification(v, body)
+    if errors:
+        raise HTTPException(status_code=400, detail="Please complete: " + ", ".join(errors))
+    agreement = await get_agreement_doc()
+    now = datetime.now(timezone.utc)
+    v["agreement"] = {
+        "version": agreement.get("version", ""),
+        "accepted": True,
+        "accepted_at": now.isoformat(),
+        "signature_full_name": (body.signature_full_name or "").strip(),
+        "signature_designation": (body.signature_designation or "").strip(),
+    }
+    v["declarations"] = {"authorised": True, "accurate": True, "agreement": True, "food_safety": True}
+    await db.vendors.update_one({"vendor_id": vendor["vendor_id"]}, {"$set": {
+        "verification": v, "status": "pending_verification",
+        "verification_submitted_at": now, "rejection_reason": "", "updated_at": now,
+    }})
+    return {"message": "Your verification has been submitted and is awaiting admin approval.", "status": "pending_verification"}
+
+
+# ── Admin: vendor agreement management ──────────────────────────────────
+
+class AgreementBody(BaseModel):
+    content: str
+    version: Optional[str] = None
+    pdf_url: Optional[str] = ""
+    bump_version: Optional[bool] = True
+
+
+@api.get("/ops/vendor-agreement")
+async def ops_get_agreement(request: Request):
+    await require_permission(request, "view_vendors")
+    return await get_agreement_doc()
+
+
+@api.put("/ops/vendor-agreement")
+async def ops_update_agreement(body: AgreementBody, request: Request):
+    user = await require_permission(request, "manage_vendors")
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin can edit the vendor agreement.")
+    current = await get_agreement_doc()
+    version = body.version
+    if not version:
+        if body.bump_version:
+            try:
+                version = str(round(float(current.get("version", "1.0")) + 0.1, 1))
+            except Exception:
+                version = "1.0"
+        else:
+            version = current.get("version", "1.0")
+    await db.settings.update_one({"_id": "vendor_agreement"}, {"$set": {
+        "content": body.content, "version": version, "pdf_url": body.pdf_url or "",
+        "updated_at": datetime.now(timezone.utc), "updated_by": user.get("name") or user.get("email"),
+    }}, upsert=True)
+    return await get_agreement_doc()
+
+
+# ── Admin: compliance review ────────────────────────────────────────────
+
+class ReasonBody(BaseModel):
+    reason: Optional[str] = ""
+
+
+def _admin_only(user):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin can perform this action.")
+
+
+@api.get("/ops/compliance")
+async def ops_compliance_list(request: Request, status: Optional[str] = None):
+    await require_permission(request, "view_vendors")
+    query: dict = {"status": status} if status else {}
+    vendors = await db.vendors.find(query, {"_id": 0}).to_list(1000)
+    out = []
+    for v in vendors:
+        ver = v.get("verification") or {}
+        out.append({
+            "vendor_id": v.get("vendor_id"), "name": v.get("name"), "email": v.get("email"),
+            "status": v.get("status", "draft"),
+            "business_name": ver.get("business_name", ""),
+            "fssai_number": ver.get("fssai_number", ""),
+            "gst_status": ver.get("gst_status", ""),
+            "submitted_at": _iso(v.get("verification_submitted_at")),
+            "rejection_reason": v.get("rejection_reason", ""),
+        })
+    order = {"pending_verification": 0, "rejected": 1, "draft": 2, "suspended": 3, "active": 4}
+    out.sort(key=lambda r: (order.get(r["status"], 9), (r.get("name") or "").lower()))
+    return {"items": out, "total": len(out)}
+
+
+@api.get("/ops/compliance/{vendor_id}")
+async def ops_compliance_detail(vendor_id: str, request: Request):
+    await require_permission(request, "view_vendors")
+    v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {
+        "vendor_id": v.get("vendor_id"), "name": v.get("name"), "email": v.get("email"),
+        "status": v.get("status", "draft"), "rejection_reason": v.get("rejection_reason", ""),
+        "submitted_at": _iso(v.get("verification_submitted_at")),
+        "verification": v.get("verification") or {},
+    }
+
+
+@api.post("/ops/vendors/{vendor_id}/approve")
+async def ops_approve_vendor(vendor_id: str, request: Request):
+    user = await require_permission(request, "manage_vendors")
+    _admin_only(user)
+    v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    now = datetime.now(timezone.utc)
+    await db.vendors.update_one({"vendor_id": vendor_id}, {"$set": {
+        "status": "active", "rejection_reason": "",
+        "approved_by": user.get("name") or user.get("email"), "approved_at": now, "updated_at": now,
+    }})
+    return {"message": "Vendor approved and activated", "status": "active"}
+
+
+@api.post("/ops/vendors/{vendor_id}/reject")
+async def ops_reject_vendor(vendor_id: str, body: ReasonBody, request: Request):
+    user = await require_permission(request, "manage_vendors")
+    _admin_only(user)
+    if not (body.reason or "").strip():
+        raise HTTPException(status_code=400, detail="A rejection reason is required.")
+    now = datetime.now(timezone.utc)
+    result = await db.vendors.update_one({"vendor_id": vendor_id}, {"$set": {
+        "status": "rejected", "rejection_reason": body.reason.strip(),
+        "rejected_by": user.get("name") or user.get("email"), "rejected_at": now, "updated_at": now,
+    }})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"message": "Vendor rejected", "status": "rejected"}
+
+
+@api.post("/ops/vendors/{vendor_id}/suspend")
+async def ops_suspend_vendor(vendor_id: str, body: ReasonBody, request: Request):
+    user = await require_permission(request, "manage_vendors")
+    _admin_only(user)
+    now = datetime.now(timezone.utc)
+    result = await db.vendors.update_one({"vendor_id": vendor_id}, {"$set": {
+        "status": "suspended", "suspension_reason": (body.reason or "").strip(),
+        "suspended_by": user.get("name") or user.get("email"), "suspended_at": now, "updated_at": now,
+    }})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"message": "Vendor suspended", "status": "suspended"}
 
 
 @api.delete("/ops/vendors/{vendor_id}")

@@ -95,6 +95,13 @@ export const opsApi = {
   updateVendor: (id: string, b: any) => apiFetch(`/ops/vendors/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   vendorStatus: (id: string, status: string) => apiFetch(`/ops/vendors/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   deleteVendor: (id: string) => apiFetch(`/ops/vendors/${id}`, { method: 'DELETE' }),
+  approveVendor: (id: string) => apiFetch(`/ops/vendors/${id}/approve`, { method: 'POST' }),
+  rejectVendor: (id: string, reason: string) => apiFetch(`/ops/vendors/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  suspendVendor: (id: string, reason: string) => apiFetch(`/ops/vendors/${id}/suspend`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  complianceList: (status?: string) => apiFetch(`/ops/compliance${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  complianceDetail: (id: string) => apiFetch(`/ops/compliance/${id}`),
+  getAgreement: () => apiFetch('/ops/vendor-agreement'),
+  updateAgreement: (b: any) => apiFetch('/ops/vendor-agreement', { method: 'PUT', body: JSON.stringify(b) }),
   assignableOps: () => apiFetch('/ops/assignable-ops'),
   addNote: (id: string, note: string) => apiFetch(`/ops/vendors/${id}/notes`, { method: 'POST', body: JSON.stringify({ note }) }),
 

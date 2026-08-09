@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X, KeyRound } from 'lucide-react-native';
+import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X, KeyRound, ShieldCheck, ChevronRight } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
@@ -86,6 +86,7 @@ export default function DashboardScreen() {
   const [editAddress, setEditAddress] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [saving, setSaving] = useState(false);
+  const [vendorStatus, setVendorStatus] = useState<string>('active');
 
   const loadData = useCallback(async () => {
     try {
@@ -122,6 +123,7 @@ export default function DashboardScreen() {
     useCallback(() => {
       setLoading(true);
       loadData();
+      vendorApi.getVerification().then((r: any) => setVendorStatus(r?.status || 'active')).catch(() => {});
     }, [activeTab])
   );
 
@@ -433,6 +435,32 @@ export default function DashboardScreen() {
         )}
       </View>
 
+      {vendorStatus !== 'active' && (
+        <TouchableOpacity
+          testID="verification-banner"
+          style={[styles.verifBanner, vendorStatus === 'suspended' && { backgroundColor: '#FEF2F2', borderColor: COLORS.error + '44' }]}
+          onPress={() => router.push('/vendor-verification')}
+          activeOpacity={0.85}
+        >
+          <ShieldCheck size={20} color={vendorStatus === 'suspended' ? COLORS.error : COLORS.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.verifTitle}>
+              {vendorStatus === 'pending_verification' ? 'Verification under review'
+                : vendorStatus === 'rejected' ? 'Verification needs changes'
+                : vendorStatus === 'suspended' ? 'Account suspended'
+                : 'Complete your business verification'}
+            </Text>
+            <Text style={styles.verifSub}>
+              {vendorStatus === 'pending_verification' ? 'Awaiting admin approval. You cannot go live yet.'
+                : vendorStatus === 'rejected' ? 'Tap to review the reason and resubmit.'
+                : vendorStatus === 'suspended' ? 'Contact the Perfectly Good team for help.'
+                : 'You must be approved before you can go live and receive orders.'}
+            </Text>
+          </View>
+          <ChevronRight size={20} color={COLORS.textMuted} />
+        </TouchableOpacity>
+      )}
+
       {/* Tabs */}
       <View style={styles.tabRow}>
         <TouchableOpacity
@@ -671,6 +699,9 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm },
+  verifBanner: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginHorizontal: SPACING.md, marginBottom: SPACING.sm, padding: SPACING.md, borderRadius: RADIUS.md, backgroundColor: COLORS.primary + '10', borderWidth: 1, borderColor: COLORS.primary + '33' },
+  verifTitle: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.textPrimary },
+  verifSub: { fontSize: 12.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
   screenTitle: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   addBtnText: { color: '#fff', fontSize: 14, fontFamily: 'DMSans_700Bold' },
