@@ -8,7 +8,7 @@ import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
-  ArrowLeft, CheckCircle2, Clock, XCircle, Upload, FileText, ShieldCheck, Ban,
+  ArrowLeft, CheckCircle2, Clock, XCircle, Upload, FileText, Ban,
 } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { vendorApi } from '../src/api/client';
@@ -46,10 +46,10 @@ export default function VendorVerification() {
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState('draft');
-  const [locked, setLocked] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [agreement, setAgreement] = useState<any>(null);
   const [scrolledEnd, setScrolledEnd] = useState(false);
+  const boxH = React.useRef(0);
 
   // form
   const [f, setF] = useState<any>({
@@ -70,7 +70,6 @@ export default function VendorVerification() {
     try {
       const res = await vendorApi.getVerification();
       setStatus(res.status);
-      setLocked(!!res.locked);
       setRejectionReason(res.rejection_reason || '');
       setAgreement(res.agreement);
       const v = res.verification || {};
@@ -233,6 +232,8 @@ export default function VendorVerification() {
             <ScrollView
               nestedScrollEnabled
               showsVerticalScrollIndicator
+              onLayout={(e) => { boxH.current = e.nativeEvent.layout.height; }}
+              onContentSizeChange={(_w, h) => { if (h <= boxH.current + 8) setScrolledEnd(true); }}
               onScroll={(e) => {
                 const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
                 if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 24) setScrolledEnd(true);
