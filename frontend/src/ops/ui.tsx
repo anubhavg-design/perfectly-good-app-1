@@ -135,7 +135,7 @@ export function Chips({ value, options, onChange }: { value?: string; options: s
           <Pressable key={o} onPress={() => onChange(o)}
             style={[styles.chip, active && { backgroundColor: C.primary, borderColor: C.primary }]}>
             <Text style={{ color: active ? '#fff' : C.textSec, fontSize: 13, fontWeight: '600' }}>
-              {o.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+              {o === '' ? 'All' : o.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
             </Text>
           </Pressable>
         );
