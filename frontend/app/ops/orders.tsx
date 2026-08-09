@@ -2,10 +2,10 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { opsApi } from '../../src/api/opsApi';
 import { C, SP, money, fmtDateTime, titleCase, hasPerm } from '../../src/ops/theme';
-import { Card, Badge, DataTable, Spinner, PageHeader, Chips, Dropdown, EmptyState, Btn, ConfirmDialog, Sheet, Field } from '../../src/ops/ui';
+import { Card, Badge, DataTable, Spinner, PageHeader, Chips, Dropdown, EmptyState, Btn, ConfirmDialog, Sheet, Field, TextField } from '../../src/ops/ui';
 import { ExportButtons } from '../../src/ops/ExportButtons';
 import { useAuth } from '../../src/context/AuthContext';
-import { FlaskConical } from 'lucide-react-native';
+import { FlaskConical, ScanLine, CheckCircle2, XCircle } from 'lucide-react-native';
 
 const STATUS_TONE: any = { reserved: 'info', picked_up: 'success', cancelled: 'danger', refunded: 'warn', expired: 'warn' };
 
@@ -26,6 +26,26 @@ export default function Orders() {
   const [testVendor, setTestVendor] = useState('');
   const [creatingTest, setCreatingTest] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
+
+  // Pickup code verification
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyCode, setVerifyCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<any>(null);
+
+  const openVerify = () => { setVerifyCode(''); setVerifyResult(null); setVerifyOpen(true); };
+  const doVerify = async () => {
+    const code = verifyCode.trim();
+    if (!code) { setVerifyResult({ valid: false, message: 'Please enter a pickup code.' }); return; }
+    setVerifying(true);
+    try {
+      const res = await opsApi.verifyPickup(code);
+      setVerifyResult(res);
+      if (res?.valid) await load();
+    } catch (e: any) {
+      setVerifyResult({ valid: false, message: e.message || 'Could not verify this code.' });
+    } finally { setVerifying(false); }
+  };
 
   const openTest = async () => {
     setTestResult(null); setTestOpen(true);
@@ -90,6 +110,7 @@ export default function Orders() {
     <View>
       <PageHeader title="Orders" subtitle={`${data.total || 0} orders`} right={
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP.md }}>
+          {canUpdate && <Btn title="Verify Pickup" variant="secondary" small icon={ScanLine} onPress={openVerify} />}
           {isAdmin && <Btn title="Test Order" variant="secondary" small icon={FlaskConical} onPress={openTest} />}
           <ExportButtons entity="orders" />
         </View>
@@ -133,6 +154,44 @@ export default function Orders() {
           </View>
         )}
       </Sheet>
+
+      <Sheet visible={verifyOpen} onClose={() => setVerifyOpen(false)} title="Verify Pickup Code">
+        <View style={{ gap: SP.md }}>
+          <Text style={{ color: C.textSec, fontSize: 13.5 }}>
+            Enter the customer's 6-digit pickup code to confirm it. A valid, unclaimed order is
+            marked as picked up automatically.
+          </Text>
+          <Field label="Pickup Code">
+            <TextField
+              value={verifyCode}
+              onChangeText={(v: string) => { setVerifyCode(v.replace(/[^0-9]/g, '').slice(0, 6)); setVerifyResult(null); }}
+              placeholder="e.g. 482915"
+              keyboardType="number-pad"
+            />
+          </Field>
+          <Btn title="Verify Code" icon={ScanLine} loading={verifying} onPress={doVerify} full disabled={!verifyCode.trim()} />
+
+          {verifyResult ? (
+            <View style={[styles.verifyResult, { borderColor: verifyResult.valid ? C.success : C.danger, backgroundColor: (verifyResult.valid ? C.success : C.danger) + '10' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP.sm, marginBottom: verifyResult.order_id ? SP.sm : 0 }}>
+                {verifyResult.valid ? <CheckCircle2 size={20} color={C.success} /> : <XCircle size={20} color={C.danger} />}
+                <Text style={{ flex: 1, fontWeight: '700', color: verifyResult.valid ? C.success : C.danger }}>{verifyResult.message}</Text>
+              </View>
+              {verifyResult.order_id ? (
+                <View style={{ gap: 4 }}>
+                  <VRow label="Order" value={verifyResult.order_id} />
+                  <VRow label="Customer" value={verifyResult.customer_name} />
+                  <VRow label="Vendor" value={verifyResult.vendor_name} />
+                  <VRow label="Item" value={`${verifyResult.quantity}× ${verifyResult.food_item_name}`} />
+                  <VRow label="Value" value={money(verifyResult.order_value)} />
+                  <VRow label="Status" value={titleCase(verifyResult.status)} />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      </Sheet>
+
       {totalPages > 1 && (
         <View style={styles.pager}>
           <Btn title="Previous" variant="secondary" small disabled={page <= 1} onPress={() => setPage((p) => p - 1)} />
@@ -150,4 +209,17 @@ const styles = StyleSheet.create({
   codeCard: { backgroundColor: C.primary, borderRadius: 14, padding: SP.lg, alignItems: 'center' },
   codeLabel: { fontSize: 12, fontWeight: '800', color: 'rgba(255,255,255,0.85)', letterSpacing: 1 },
   codeValue: { fontSize: 40, fontWeight: '800', color: '#fff', letterSpacing: 8, marginTop: 4 },
+  verifyResult: { borderWidth: 1, borderRadius: 12, padding: SP.md, marginTop: SP.sm },
+  vrow: { flexDirection: 'row', justifyContent: 'space-between', gap: SP.md },
+  vrowLabel: { fontSize: 12.5, color: C.textSec },
+  vrowValue: { fontSize: 13, fontWeight: '600', color: C.text, flexShrink: 1, textAlign: 'right' },
 });
+
+function VRow({ label, value }: { label: string; value?: any }) {
+  return (
+    <View style={styles.vrow}>
+      <Text style={styles.vrowLabel}>{label}</Text>
+      <Text style={styles.vrowValue}>{value || '—'}</Text>
+    </View>
+  );
+}

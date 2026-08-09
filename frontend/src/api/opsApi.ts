@@ -87,7 +87,7 @@ const qs = (o: Record<string, any> = {}) => {
 };
 
 export const opsApi = {
-  stats: () => apiFetch('/ops/dashboard/stats'),
+  stats: (range?: string) => apiFetch(`/ops/dashboard/stats${range ? `?range=${encodeURIComponent(range)}` : ''}`),
 
   listVendors: (p?: any) => apiFetch(`/ops/vendors${qs(p)}`),
   createVendor: (b: any) => apiFetch('/ops/vendors', { method: 'POST', body: JSON.stringify(b) }),
@@ -110,6 +110,7 @@ export const opsApi = {
   orderStatus: (id: string, status: string) => apiFetch(`/ops/orders/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   refundOrder: (id: string) => apiFetch(`/ops/orders/${id}/refund`, { method: 'POST' }),
   createTestOrder: (vendor_id?: string) => apiFetch('/ops/orders/test', { method: 'POST', body: JSON.stringify({ vendor_id: vendor_id || null }) }),
+  verifyPickup: (code: string) => apiFetch('/ops/orders/verify-pickup', { method: 'POST', body: JSON.stringify({ code }) }),
   supportRequests: (p?: any) => apiFetch(`/ops/support-requests${qs(p)}`),
   supportOpenCount: () => apiFetch('/ops/support-open-count'),
   supportDetail: (id: string) => apiFetch(`/ops/support-requests/${id}`),

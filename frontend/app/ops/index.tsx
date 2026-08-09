@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Store, CheckCircle2, Clock, UtensilsCrossed, ShoppingBag, CalendarDays, IndianRupee, TrendingUp, Wallet, Plus, Upload, Eye } from 'lucide-react-native';
+import { Store, CheckCircle2, Clock, UtensilsCrossed, ShoppingBag, IndianRupee, TrendingUp, Wallet, Plus, Upload, Eye } from 'lucide-react-native';
 import { opsApi } from '../../src/api/opsApi';
 import { C, SP, R, money, hasPerm } from '../../src/ops/theme';
 import { Card, Spinner, PageHeader } from '../../src/ops/ui';
@@ -12,29 +12,55 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState<'today' | 'week' | 'month'>('today');
 
   useEffect(() => {
-    opsApi.stats().then(setStats).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    let active = true;
+    opsApi.stats(range).then((s) => { if (active) setStats(s); }).catch(() => {}).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [range]);
 
   if (loading) return <Spinner label="Loading metrics…" />;
+
+  const rangeLabel = range === 'today' ? 'Today' : range === 'week' ? 'This Week' : 'This Month';
 
   const cards = [
     { label: 'Total Vendors', value: stats?.total_vendors ?? 0, icon: Store, tone: C.info },
     { label: 'Active Vendors', value: stats?.active_vendors ?? 0, icon: CheckCircle2, tone: C.success },
     { label: 'Pending Vendors', value: stats?.pending_vendors ?? 0, icon: Clock, tone: C.warn },
     { label: 'Live Menu Items', value: stats?.live_menu_items ?? 0, icon: UtensilsCrossed, tone: C.primary },
-    { label: 'Orders Today', value: stats?.orders_today ?? 0, icon: ShoppingBag, tone: C.info },
-    { label: 'Orders This Week', value: stats?.orders_week ?? 0, icon: CalendarDays, tone: C.primary },
-    { label: 'Revenue Today', value: money(stats?.revenue_today), icon: IndianRupee, tone: C.success },
-    { label: 'Revenue This Month', value: money(stats?.revenue_month), icon: TrendingUp, tone: C.success },
-    { label: 'Commission Earned', value: money(stats?.commission_earned), icon: IndianRupee, tone: C.primaryDark },
+    { label: `Orders · ${rangeLabel}`, value: stats?.range_orders ?? 0, icon: ShoppingBag, tone: C.info },
+    { label: `Revenue · ${rangeLabel}`, value: money(stats?.range_revenue), icon: IndianRupee, tone: C.success },
+    { label: `Commission · ${rangeLabel}`, value: money(stats?.range_commission), icon: TrendingUp, tone: C.primaryDark },
     { label: 'Pending Payouts', value: money(stats?.pending_payouts), icon: Wallet, tone: C.warn },
+  ];
+
+  const RANGES: { key: 'today' | 'week' | 'month'; label: string }[] = [
+    { key: 'today', label: 'Today' },
+    { key: 'week', label: 'This Week' },
+    { key: 'month', label: 'This Month' },
   ];
 
   return (
     <View>
       <PageHeader title={`Welcome, ${(user as any)?.name?.split(' ')[0] || 'Team'}`} subtitle="Operations overview" />
+
+      <View style={styles.rangeRow}>
+        {RANGES.map((r) => {
+          const active = range === r.key;
+          return (
+            <Pressable
+              key={r.key}
+              testID={`dash-range-${r.key}`}
+              onPress={() => setRange(r.key)}
+              style={[styles.rangeChip, active && styles.rangeChipActive]}
+            >
+              <Text style={[styles.rangeChipText, active && styles.rangeChipTextActive]}>{r.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <View style={styles.grid}>
         {cards.map((c) => {
           const Icon = c.icon;
@@ -69,6 +95,11 @@ function QuickAction({ icon: Icon, label, onPress }: any) {
 
 const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: SP.md },
+  rangeRow: { flexDirection: 'row', gap: SP.sm, marginBottom: SP.lg, flexWrap: 'wrap' },
+  rangeChip: { paddingVertical: SP.sm, paddingHorizontal: SP.lg, borderRadius: R.full, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface },
+  rangeChipActive: { backgroundColor: C.primary, borderColor: C.primary },
+  rangeChipText: { fontSize: 13.5, fontWeight: '700', color: C.textSec },
+  rangeChipTextActive: { color: '#fff' },
   statCard: { width: 188, flexGrow: 1, minWidth: 160 },
   iconBox: { width: 38, height: 38, borderRadius: R.md, alignItems: 'center', justifyContent: 'center', marginBottom: SP.md },
   statValue: { fontSize: 24, fontWeight: '800', color: C.text },

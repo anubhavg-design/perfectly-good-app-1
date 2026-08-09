@@ -2046,7 +2046,7 @@ def _day_start(now: datetime) -> datetime:
 
 
 @api.get("/ops/dashboard/stats")
-async def ops_dashboard_stats(request: Request):
+async def ops_dashboard_stats(request: Request, range: Optional[str] = None):
     await require_permission(request, "view_dashboard")
     cfg = await get_settings_doc()
     now = datetime.now(timezone.utc)
@@ -2064,6 +2064,14 @@ async def ops_dashboard_stats(request: Request):
     month_orders = await db.orders.find({"created_at": {"$gte": month0}, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(100000)
     revenue_today = round(sum(order_revenue(o) for o in today_orders), 2)
     revenue_month = round(sum(order_revenue(o) for o in month_orders), 2)
+
+    # Date-range scoped metrics (today / week / month) for the dashboard toggle.
+    rng = range if range in ("today", "week", "month") else "today"
+    range_start = {"today": day0, "week": week0, "month": month0}[rng]
+    range_orders_list = await db.orders.find({"created_at": {"$gte": range_start}, "status": {"$nin": ["cancelled", "refunded"]}}, {"_id": 0}).to_list(100000)
+    range_orders = len(range_orders_list)
+    range_revenue = round(sum(order_revenue(o) for o in range_orders_list), 2)
+    range_commission = round(range_revenue * cfg["commission_rate"], 2)
 
     completed = await db.orders.find({"status": "picked_up"}, {"_id": 0}).to_list(100000)
     commission_earned = round(sum(order_revenue(o) for o in completed) * cfg["commission_rate"], 2)
@@ -2095,6 +2103,10 @@ async def ops_dashboard_stats(request: Request):
         "revenue_month": revenue_month,
         "commission_earned": commission_earned,
         "pending_payouts": round(pending_payouts, 2),
+        "range": rng,
+        "range_orders": range_orders,
+        "range_revenue": range_revenue,
+        "range_commission": range_commission,
     }
 
 
@@ -2444,6 +2456,62 @@ async def ops_update_order_status(order_id: str, body: dict, request: Request):
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Order not found")
     return {"message": "Status updated", "status": status}
+
+@api.post("/ops/orders/verify-pickup")
+async def ops_verify_pickup(body: dict, request: Request):
+    """Ops-side pickup code verification. Staff enter a customer's 6-digit code to
+    confirm it on the spot. A valid, still-reserved order is completed (marked
+    picked_up); already-handled orders return their current state with a clear message."""
+    me = await require_permission(request, "update_order_status")
+    code = (body.get("code") or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Please enter a pickup code.")
+
+    order = await db.orders.find_one({"pickup_code": code}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="No order found for this pickup code.")
+
+    def summary(o: dict, ok: bool, message: str) -> dict:
+        created = o.get("created_at")
+        return {
+            "valid": ok,
+            "message": message,
+            "order_id": o.get("order_id"),
+            "status": o.get("status"),
+            "customer_name": o.get("user_name", "Customer"),
+            "vendor_name": o.get("vendor_name", "—"),
+            "food_item_name": o.get("food_item_name", "—"),
+            "quantity": o.get("quantity", 1),
+            "order_value": o.get("total_amount", 0),
+            "pickup_start_time": o.get("pickup_start_time", ""),
+            "pickup_end_time": o.get("pickup_end_time", ""),
+            "created_at": created.isoformat() if isinstance(created, datetime) else created,
+        }
+
+    status = order.get("status")
+    if status == "picked_up":
+        return summary(order, False, "This order was already picked up.")
+    if status in ("cancelled", "refunded", "expired"):
+        return summary(order, False, f"This order is {status} and can no longer be verified.")
+
+    now = datetime.now(timezone.utc)
+    result = await db.orders.update_one(
+        {"pickup_code": code, "status": "reserved"},
+        {"$set": {
+            "status": "picked_up",
+            "pickup_verified": True,
+            "pickup_verified_at": now,
+            "pickup_verified_by": me.get("name") or me.get("email") or "Ops",
+        }},
+    )
+    if result.modified_count == 0:
+        fresh = await db.orders.find_one({"pickup_code": code}, {"_id": 0}) or order
+        return summary(fresh, False, "This order could not be completed. Please refresh and try again.")
+
+    order["status"] = "picked_up"
+    return summary(order, True, "Pickup verified — order marked as picked up.")
+
+
 
 
 @api.post("/ops/orders/{order_id}/refund")
