@@ -8,10 +8,11 @@ import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
-  ArrowLeft, CheckCircle2, Clock, XCircle, Upload, FileText, Ban,
+  ArrowLeft, CheckCircle2, Clock, XCircle, Upload, FileText, Ban, LogOut,
 } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { vendorApi } from '../src/api/client';
+import { useAuth } from '../src/context/AuthContext';
 
 async function pickDocumentBase64(): Promise<{ name: string; mime: string; data: string } | null> {
   const res = await DocumentPicker.getDocumentAsync({
@@ -42,6 +43,7 @@ async function pickDocumentBase64(): Promise<{ name: string; mime: string; data:
 
 export default function VendorVerification() {
   const router = useRouter();
+  const { logout } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -137,17 +139,25 @@ export default function VendorVerification() {
     return <SafeAreaView style={styles.container}><ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 80 }} /></SafeAreaView>;
   }
 
+  const gated = status === 'draft' || status === 'rejected';
+
   const Header = (
     <View style={styles.header}>
-      <TouchableOpacity testID="verif-back" onPress={() => router.back()} style={styles.headerBack}>
-        <ArrowLeft size={22} color={COLORS.textPrimary} />
-      </TouchableOpacity>
+      {gated ? (
+        <TouchableOpacity testID="verif-logout" onPress={() => logout()} style={styles.headerBack}>
+          <LogOut size={20} color={COLORS.textPrimary} />
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity testID="verif-back" onPress={() => router.replace('/(tabs)/dashboard')} style={styles.headerBack}>
+          <ArrowLeft size={22} color={COLORS.textPrimary} />
+        </TouchableOpacity>
+      )}
       <Text style={styles.headerTitle}>Business Verification</Text>
       <View style={{ width: 40 }} />
     </View>
   );
 
-  // Locked / status states
+  // Locked / status states (compliance already submitted or account decided)
   if (status === 'pending_verification' || status === 'active' || status === 'suspended') {
     const cfg = status === 'active'
       ? { icon: CheckCircle2, color: COLORS.primary, title: 'Your account is active', msg: 'Your verification was approved. You can now go live and receive orders.' }
@@ -162,6 +172,9 @@ export default function VendorVerification() {
           <View style={[styles.statusIcon, { backgroundColor: cfg.color + '18' }]}><Icon size={40} color={cfg.color} /></View>
           <Text style={styles.statusTitle}>{cfg.title}</Text>
           <Text style={styles.statusMsg}>{cfg.msg}</Text>
+          <TouchableOpacity testID="go-dashboard" style={styles.dashBtn} onPress={() => router.replace('/(tabs)/dashboard')}>
+            <Text style={styles.dashBtnText}>Go to Dashboard</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -359,4 +372,6 @@ const styles = StyleSheet.create({
   statusIcon: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.lg },
   statusTitle: { fontSize: 22, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary, textAlign: 'center' },
   statusMsg: { fontSize: 14.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, textAlign: 'center', marginTop: SPACING.sm, lineHeight: 22 },
+  dashBtn: { marginTop: SPACING.xl, backgroundColor: COLORS.primary, paddingVertical: 14, paddingHorizontal: SPACING.xl, borderRadius: RADIUS.md },
+  dashBtnText: { color: '#fff', fontSize: 15, fontFamily: 'Outfit_600SemiBold' },
 });

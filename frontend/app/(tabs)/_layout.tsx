@@ -1,14 +1,35 @@
-import React from 'react';
-import { Tabs } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { Tabs, Redirect } from 'expo-router';
 import { Home, ShoppingBag, User, LayoutDashboard } from 'lucide-react-native';
 import { COLORS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
+import { vendorApi } from '../../src/api/client';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 
 export default function TabLayout() {
   const { user, loading } = useAuth();
+  const isVendor = user?.role === 'vendor';
 
-  if (loading) {
+  // Vendor compliance gate: a vendor with incomplete/unaccepted compliance
+  // (draft or rejected) must finish the compliance screen before reaching any tab.
+  const [verifChecked, setVerifChecked] = useState(false);
+  const [needsCompliance, setNeedsCompliance] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (isVendor) {
+      setVerifChecked(false);
+      vendorApi.getVerification()
+        .then((r: any) => { if (active) setNeedsCompliance(['draft', 'rejected'].includes(r?.status)); })
+        .catch(() => { if (active) setNeedsCompliance(false); })
+        .finally(() => { if (active) setVerifChecked(true); });
+    } else {
+      setVerifChecked(true);
+    }
+    return () => { active = false; };
+  }, [isVendor, (user as any)?.user_id]);
+
+  if (loading || (isVendor && !verifChecked)) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={COLORS.primary} />
@@ -16,7 +37,10 @@ export default function TabLayout() {
     );
   }
 
-  const isVendor = user?.role === 'vendor';
+  if (isVendor && needsCompliance) {
+    return <Redirect href="/vendor-verification" />;
+  }
+
   const showDashboard = user?.role === 'vendor' || user?.role === 'admin';
 
   return (
