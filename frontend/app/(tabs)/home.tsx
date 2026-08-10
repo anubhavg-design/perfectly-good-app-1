@@ -221,8 +221,12 @@ export default function HomeScreen() {
       ) : null}
       {/* Header */}
       <View style={styles.headerSection}>
-        <Text style={styles.greeting}>Perfectly Good</Text>
-        <Text style={styles.subGreeting}>Rescue surplus food & order from restaurants nearby</Text>
+        <Image
+          source={require('../../assets/images/splash-icon.png')}
+          style={styles.headerLogo}
+          resizeMode="contain"
+          accessibilityLabel="Perfectly Good"
+        />
       </View>
 
       {/* Search */}
@@ -366,7 +370,8 @@ const styles = StyleSheet.create({
   signInHintTextWrap: { flex: 1 },
   signInHintText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
   signInHintCta: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.primary, marginRight: 4 },
-  headerSection: { paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm },
+  headerSection: { paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm, alignItems: 'center' },
+  headerLogo: { width: 180, height: 56 },
   greeting: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: COLORS.primary },
   subGreeting: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
   searchRow: { flexDirection: 'row', paddingHorizontal: SPACING.md, marginBottom: SPACING.sm, gap: SPACING.sm },
