@@ -560,6 +560,9 @@ def item_to_drop(item: dict, vendor: Optional[dict]) -> dict:
         out["pickup_start_time"] = vendor.get("pickup_start_time", "")
         out["pickup_end_time"] = vendor.get("pickup_end_time", "")
         out["service_type"] = vendor.get("service_type", "both")
+        _ver = vendor.get("verification") or {}
+        _agr = _ver.get("agreement") or {}
+        out["vendor_verified"] = vendor.get("status") == "active" and bool(_agr.get("accepted")) and bool((_ver.get("fssai_number") or "").strip())
     for k in ("created_at", "updated_at"):
         if k in out and hasattr(out[k], "isoformat"):
             out[k] = out[k].isoformat()
@@ -622,6 +625,8 @@ async def get_drop(item_id: str, lat: Optional[float] = None, lon: Optional[floa
 # ══════════════════════════════════════════════════════════════════════════
 
 def _vendor_public(v: dict) -> dict:
+    ver = v.get("verification") or {}
+    agreement = ver.get("agreement") or {}
     return {
         "vendor_id": v.get("vendor_id"),
         "name": v.get("name", ""),
@@ -633,6 +638,8 @@ def _vendor_public(v: dict) -> dict:
         "discount_percentage": v.get("discount_percentage", 0) or 0,
         "pickup_start_time": v.get("pickup_start_time", ""),
         "pickup_end_time": v.get("pickup_end_time", ""),
+        # Verified = admin-approved (active) AND has completed compliance (FSSAI + accepted agreement).
+        "verified": v.get("status") == "active" and bool(agreement.get("accepted")) and bool((ver.get("fssai_number") or "").strip()),
     }
 
 async def _ops_name_map() -> dict:

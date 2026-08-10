@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
@@ -158,7 +158,15 @@ export default function HomeScreen() {
         </View>
       )}
       <View style={{ flex: 1 }}>
-        <Text style={styles.restName} numberOfLines={1}>{item.name}</Text>
+        <View style={styles.restNameRow}>
+          <Text style={styles.restName} numberOfLines={1}>{item.name}</Text>
+          {item.verified ? (
+            <View style={styles.verifiedBadge}>
+              <BadgeCheck size={12} color={COLORS.primary} />
+              <Text style={styles.verifiedText}>Verified</Text>
+            </View>
+          ) : null}
+        </View>
         <Text style={styles.restCategory} numberOfLines={1}>{item.category}</Text>
         <View style={styles.restMetaRow}>
           {item.distance != null ? (
@@ -430,6 +438,9 @@ const styles = StyleSheet.create({
   restLogoPlaceholder: { backgroundColor: COLORS.primaryDark, justifyContent: 'center', alignItems: 'center' },
   restLogoInitial: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: '#fff' },
   restName: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
+  restNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  verifiedBadge: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: COLORS.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  verifiedText: { fontSize: 10.5, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
   restCategory: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 1 },
   restMetaRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginTop: 6, flexWrap: 'wrap' },
   restMeta: { flexDirection: 'row', alignItems: 'center', gap: 3 },

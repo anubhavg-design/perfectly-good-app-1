@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, MapPin, Clock, Tag, Leaf, ExternalLink, Sparkles } from 'lucide-react-native';
+import { ArrowLeft, MapPin, Clock, Tag, Leaf, ExternalLink, Sparkles, BadgeCheck } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { restaurantsApi } from '../../src/api/client';
 
@@ -114,7 +114,15 @@ export default function RestaurantScreen() {
 
         {/* Info */}
         <View style={styles.infoBlock}>
-          <Text style={styles.name}>{vendor.name}</Text>
+          <View style={styles.nameRow}>
+            <Text style={styles.name}>{vendor.name}</Text>
+            {vendor.verified ? (
+              <View style={styles.verifiedBadge}>
+                <BadgeCheck size={14} color={COLORS.primary} />
+                <Text style={styles.verifiedText}>Verified</Text>
+              </View>
+            ) : null}
+          </View>
           <View style={styles.metaRow}>
             <View style={styles.metaChip}>
               <Tag size={12} color={COLORS.primary} />
@@ -286,6 +294,9 @@ const styles = StyleSheet.create({
   surplusFlagText: { color: '#fff', fontSize: 12, fontFamily: 'DMSans_700Bold' },
   infoBlock: { padding: SPACING.md, backgroundColor: COLORS.surface },
   name: { fontSize: 24, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, flexWrap: 'wrap' },
+  verifiedBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: COLORS.primary + '15', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  verifiedText: { fontSize: 12, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
   metaRow: { flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.sm, flexWrap: 'wrap' },
   metaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.borderLight, borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm + 2, paddingVertical: 4 },
   metaChipText: { fontSize: 12, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },

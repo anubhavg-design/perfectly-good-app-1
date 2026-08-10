@@ -66,7 +66,17 @@ export default function VendorVerification() {
   const [agree, setAgree] = useState(false);
   const [decl, setDecl] = useState({ authorised: false, accurate: false, agreement: false, food_safety: false });
 
-  const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
+  const autosaveDirty = React.useRef(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  const set = (k: string, v: any) => { autosaveDirty.current = true; setF((p: any) => ({ ...p, [k]: v })); };
+
+  const autosavePayload = () => ({
+    business_name: f.business_name, authorised_representative: f.authorised_representative,
+    business_email: f.business_email, gst_status: f.gst_status, gst_number: f.gst_number,
+    fssai_number: f.fssai_number, bank_account_holder: f.bank_account_holder,
+    bank_account_number: f.bank_account_number, bank_ifsc: f.bank_ifsc, bank_name: f.bank_name,
+  });
 
   const load = useCallback(async () => {
     try {
@@ -91,10 +101,30 @@ export default function VendorVerification() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Progress Saver: debounced auto-save of text fields whenever the vendor edits
+  // (only while the form is editable). Certificates are saved immediately on upload.
+  const textKey = JSON.stringify(autosavePayload());
+  useEffect(() => {
+    if (!(status === 'draft' || status === 'rejected')) return;
+    if (!autosaveDirty.current) return;
+    setSaveState('saving');
+    const t = setTimeout(async () => {
+      try { await vendorApi.saveVerification(autosavePayload()); setSaveState('saved'); }
+      catch { setSaveState('idle'); }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [textKey, status]);
+
   const uploadDoc = async (key: 'gst_certificate' | 'fssai_certificate') => {
     try {
       const doc = await pickDocumentBase64();
-      if (doc) set(key, doc);
+      if (doc) {
+        autosaveDirty.current = true;
+        setF((p: any) => ({ ...p, [key]: doc }));
+        setSaveState('saving');
+        try { await vendorApi.saveVerification({ ...autosavePayload(), [key]: doc }); setSaveState('saved'); }
+        catch { setSaveState('idle'); }
+      }
     } catch (e: any) { Alert.alert('Upload failed', e.message || 'Please try again.'); }
   };
 
@@ -195,7 +225,14 @@ export default function VendorVerification() {
           </View>
         )}
 
-        <Text style={styles.intro}>Complete the details below to submit your restaurant for approval. You can save your progress and finish later.</Text>
+        <Text style={styles.intro}>Complete the details below to submit your restaurant for approval. Your progress is saved automatically.</Text>
+
+        {saveState !== 'idle' && (
+          <View style={styles.saveRow} testID="autosave-indicator">
+            {saveState === 'saving' ? <ActivityIndicator size="small" color={COLORS.textMuted} /> : <CheckCircle2 size={14} color={COLORS.primary} />}
+            <Text style={styles.saveText}>{saveState === 'saving' ? 'Saving…' : 'Progress saved'}</Text>
+          </View>
+        )}
 
         {/* Business Details */}
         <Section title="Business Details">
@@ -339,6 +376,8 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
   content: { padding: SPACING.md },
   intro: { fontSize: 13.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginBottom: SPACING.md, lineHeight: 20 },
+  saveRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: SPACING.md },
+  saveText: { fontSize: 12.5, fontFamily: 'DMSans_500Medium', color: COLORS.textMuted },
   section: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.md, ...SHADOWS.small },
   sectionTitle: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginBottom: SPACING.sm },
   fieldLabel: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary, marginBottom: 6 },
