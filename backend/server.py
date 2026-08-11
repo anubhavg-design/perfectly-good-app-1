@@ -3000,6 +3000,90 @@ async def ops_create_test_order(body: TestOrderBody, request: Request):
     return {"order_id": order_id, "pickup_code": code, "vendor_name": vendor.get("name", ""), "vendor_id": vendor["vendor_id"]}
 
 
+# ── Admin testing utilities (create / list / delete labelled test orders) ──
+
+def _test_order_view(o: dict) -> dict:
+    ct = o.get("created_at")
+    return {
+        "order_id": o.get("order_id"),
+        "user_name": o.get("user_name"),
+        "vendor_name": o.get("vendor_name"),
+        "food_item_name": o.get("food_item_name"),
+        "quantity": o.get("quantity", 1),
+        "total_amount": o.get("total_amount", 0),
+        "status": o.get("status"),
+        "pickup_code": o.get("pickup_code"),
+        "created_at": ct.isoformat() if hasattr(ct, "isoformat") else ct,
+    }
+
+
+@api.post("/ops/testing/orders")
+async def ops_testing_create_order(request: Request):
+    """Admin-only: insert a clearly-labelled PAID test order for the vendor
+    'Perfectly Good' (falls back to any active vendor) so flows can be tested."""
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    vendor = await db.vendors.find_one({"name": {"$regex": "^perfectly good$", "$options": "i"}}, {"_id": 0})
+    if not vendor:
+        vendor = await db.vendors.find_one({"status": "active"}, {"_id": 0}) or await db.vendors.find_one({}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="No vendor found. Create a vendor first.")
+    item = await db.menu_items.find_one({"vendor_id": vendor["vendor_id"]}, {"_id": 0})
+    now = datetime.now(timezone.utc)
+    code = await _gen_pickup_code()
+    order_id = gen_id("order")
+    price = (item or {}).get("original_price") or 100
+    order_doc = {
+        "order_id": order_id,
+        "user_id": user["user_id"],
+        "user_name": "Test Customer",
+        "food_item_id": (item or {}).get("menu_item_id", "test_item"),
+        "food_item_name": (item or {}).get("name", "Test Item"),
+        "vendor_id": vendor["vendor_id"],
+        "vendor_name": vendor.get("name", ""),
+        "quantity": 1,
+        "order_type": "takeaway",
+        "discounted_price": price,
+        "item_subtotal": price,
+        "total_amount": round(price * 1.05, 2),
+        "status": "paid",
+        "pickup_code": code,
+        "pickup_verified": False,
+        "pickup_verified_at": None,
+        "pickup_verified_by": None,
+        "payment_confirmed_at": now,
+        "pickup_start_time": vendor.get("pickup_start_time", "18:00"),
+        "pickup_end_time": vendor.get("pickup_end_time", "21:00"),
+        "razorpay_order_id": f"test_{order_id}",
+        "razorpay_payment_id": f"test_pay_{order_id}",
+        "is_test": True,
+        "created_at": now,
+    }
+    await db.orders.insert_one(order_doc)
+    return _test_order_view(order_doc)
+
+
+@api.get("/ops/testing/orders")
+async def ops_testing_list_orders(request: Request):
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    rows = await db.orders.find({"is_test": True}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"items": [_test_order_view(o) for o in rows], "total": len(rows)}
+
+
+@api.delete("/ops/testing/orders/{order_id}")
+async def ops_testing_delete_order(order_id: str, request: Request):
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    res = await db.orders.delete_one({"order_id": order_id, "is_test": True})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Test order not found")
+    return {"message": "Test order deleted"}
+
+
 @api.get("/ops/users")
 async def ops_list_users(request: Request, search: Optional[str] = None, page: int = 1, page_size: int = 25):
     await require_permission(request, "view_users")
