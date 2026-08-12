@@ -98,6 +98,7 @@ export const opsApi = {
   approveVendor: (id: string) => apiFetch(`/ops/vendors/${id}/approve`, { method: 'POST' }),
   rejectVendor: (id: string, reason: string) => apiFetch(`/ops/vendors/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   suspendVendor: (id: string, reason: string) => apiFetch(`/ops/vendors/${id}/suspend`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  setVendorPassword: (id: string, password: string) => apiFetch(`/ops/vendors/${id}/password`, { method: 'PUT', body: JSON.stringify({ password }) }),
   complianceList: (status?: string) => apiFetch(`/ops/compliance${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   complianceDetail: (id: string) => apiFetch(`/ops/compliance/${id}`),
   getAgreement: () => apiFetch('/ops/vendor-agreement'),

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, TextInput, Linking } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Plus, Pencil, UtensilsCrossed, Power, Trash2, Search } from 'lucide-react-native';
+import { Plus, Pencil, UtensilsCrossed, Power, Trash2, Search, KeyRound } from 'lucide-react-native';
 import { opsApi } from '../../src/api/opsApi';
 import { C, SP, R, money, fmtDate, titleCase, hasPerm } from '../../src/ops/theme';
 import { Card, Btn, Badge, DataTable, Spinner, PageHeader, Sheet, ConfirmDialog, Chips, Dropdown, EmptyState } from '../../src/ops/ui';
@@ -28,6 +28,9 @@ export default function Vendors() {
   const [editing, setEditing] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState<any>(null);
+  const [pwdFor, setPwdFor] = useState<any>(null);
+  const [pwdValue, setPwdValue] = useState('');
+  const [pwdSaving, setPwdSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +64,22 @@ export default function Vendors() {
     catch (e: any) { alert(e.message); } finally { setSaving(false); }
   };
 
+  const savePassword = async () => {
+    if (pwdValue.trim().length < 6) { alert('Password must be at least 6 characters'); return; }
+    setPwdSaving(true);
+    try {
+      await opsApi.setVendorPassword(pwdFor.vendor_id, pwdValue.trim());
+      alert(`Temporary password set for ${pwdFor.name}`);
+      setPwdFor(null); setPwdValue('');
+    } catch (e: any) { alert(e.message); } finally { setPwdSaving(false); }
+  };
+  const genPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    let p = '';
+    for (let i = 0; i < 10; i++) p += chars[Math.floor(Math.random() * chars.length)];
+    setPwdValue(p);
+  };
+
   const columns = [
     { key: 'name', label: 'Vendor', width: 180, render: (r: any) => (
       <Pressable onPress={() => router.push(`/ops/vendor/${r.vendor_id}`)}>
@@ -79,11 +98,12 @@ export default function Vendors() {
     { key: 'order_count', label: 'Orders', width: 70, render: (r: any) => <Text style={{ fontSize: 13 }}>{r.order_count ?? 0}</Text> },
     { key: 'revenue', label: 'Revenue', width: 100, render: (r: any) => <Text style={{ fontSize: 13, fontWeight: '600' }}>{money(r.revenue)}</Text> },
     { key: 'created_at', label: 'Added', width: 110, render: (r: any) => <Text style={{ fontSize: 12.5, color: C.textSec }}>{fmtDate(r.created_at)}</Text> },
-    { key: 'actions', label: 'Actions', width: 170, render: (r: any) => (
+    { key: 'actions', label: 'Actions', width: 210, render: (r: any) => (
       <View style={{ flexDirection: 'row', gap: 4 }}>
         <IconBtn icon={UtensilsCrossed} tip="Menu" onPress={() => router.push(`/ops/vendor/${r.vendor_id}`)} />
         {canManage && <IconBtn icon={Pencil} tip="Edit" onPress={() => { setEditing(r); setShowForm(true); }} />}
         {canManage && <IconBtn icon={Power} tip="Toggle" color={r.status === 'inactive' ? C.success : C.warn} onPress={() => doToggleStatus(r)} />}
+        {isAdmin && <IconBtn icon={KeyRound} tip="Set Temporary Password" color={C.info} onPress={() => { setPwdFor(r); setPwdValue(''); }} />}
         {isAdmin && <IconBtn icon={Trash2} tip="Delete" color={C.danger} onPress={() => setConfirm(r)} />}
       </View>
     ) },
@@ -134,6 +154,30 @@ export default function Vendors() {
       <ConfirmDialog visible={!!confirm} title="Delete vendor?" danger loading={saving}
         message={`This permanently removes "${confirm?.name}", its login and all menu items. This cannot be undone.`}
         confirmLabel="Delete" onConfirm={doDelete} onCancel={() => setConfirm(null)} />
+
+      <Sheet visible={!!pwdFor} onClose={() => setPwdFor(null)} title="Set Temporary Password"
+        footer={<View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: SP.sm }}>
+          <Btn title="Cancel" variant="secondary" small onPress={() => setPwdFor(null)} />
+          <Btn title="Set Password" small loading={pwdSaving} onPress={savePassword} />
+        </View>}>
+        <Text style={{ color: C.textSec, fontSize: 13, marginBottom: SP.md }}>
+          Set a new password for <Text style={{ fontWeight: '800', color: C.text }}>{pwdFor?.name}</Text>. They can log in
+          immediately with it — no old password required. Share it with the vendor securely.
+        </Text>
+        <Text style={styles.flabel}>New Password</Text>
+        <View style={{ flexDirection: 'row', gap: SP.sm, alignItems: 'center' }}>
+          <TextInput
+            testID="vendor-temp-password-input"
+            value={pwdValue}
+            onChangeText={setPwdValue}
+            placeholder="Min 6 characters"
+            placeholderTextColor={C.textMute}
+            autoCapitalize="none"
+            style={styles.pwdInput}
+          />
+          <Btn title="Generate" variant="secondary" small onPress={genPassword} />
+        </View>
+      </Sheet>
     </View>
   );
 }
@@ -150,5 +194,7 @@ const styles = StyleSheet.create({
   searchBox: { flex: 1, minWidth: 200, flexDirection: 'row', alignItems: 'center', gap: SP.sm, backgroundColor: C.bg, borderRadius: R.md, paddingHorizontal: 12, height: 40, borderWidth: 1, borderColor: C.border },
   searchInput: { flex: 1, fontSize: 14, color: C.text, outlineStyle: 'none' as any },
   iconBtn: { width: 32, height: 32, borderRadius: R.sm, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface },
+  flabel: { fontSize: 11.5, fontWeight: '700', color: C.textMute, textTransform: 'uppercase', marginBottom: 6 },
+  pwdInput: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: R.md, paddingHorizontal: 12, height: 42, color: C.text, fontSize: 14, outlineStyle: 'none' as any },
   pager: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SP.lg, marginTop: SP.lg },
 });

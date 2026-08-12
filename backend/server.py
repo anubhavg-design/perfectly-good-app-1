@@ -3047,7 +3047,7 @@ async def ops_testing_create_order(request: Request):
         "discounted_price": price,
         "item_subtotal": price,
         "total_amount": round(price * 1.05, 2),
-        "status": "paid",
+        "status": "reserved",
         "pickup_code": code,
         "pickup_verified": False,
         "pickup_verified_at": None,
@@ -3318,6 +3318,27 @@ async def ops_delete_staff(user_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Staff member not found")
     await db.users.delete_one({"user_id": user_id})
     return {"message": "Staff removed"}
+
+
+@api.put("/ops/vendors/{vendor_id}/password")
+async def ops_set_vendor_password(vendor_id: str, body: dict, request: Request):
+    """Admin-only: set a new (temporary) password on a vendor's login account
+    directly, without needing the old password."""
+    user = await require_permission(request, "manage_vendors")
+    _admin_only(user)
+    new_password = (body.get("password") or "").strip()
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    vendor = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    uid = vendor.get("user_id")
+    if not uid:
+        raise HTTPException(status_code=400, detail="This vendor has no linked login account")
+    res = await db.users.update_one({"user_id": uid}, {"$set": {"password_hash": hash_password(new_password)}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Vendor login account not found")
+    return {"message": "Temporary password set"}
 
 
 @api.put("/ops/staff/{user_id}/password")

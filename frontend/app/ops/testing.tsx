@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { FlaskConical, Plus, Trash2 } from 'lucide-react-native';
 import { opsApi } from '../../src/api/opsApi';
-import { C, SP, R, money, fmtDateTime, titleCase } from '../../src/ops/theme';
+import { C, SP, money, fmtDateTime, titleCase } from '../../src/ops/theme';
 import { Card, Badge, DataTable, Spinner, PageHeader, EmptyState, Btn, ConfirmDialog } from '../../src/ops/ui';
 import { useAuth } from '../../src/context/AuthContext';
 
@@ -52,7 +52,7 @@ export default function Testing() {
     { key: 'vendor_name', label: 'Vendor', width: 160, render: (r: any) => <Text style={{ fontSize: 13 }}>{r.vendor_name || '—'}</Text> },
     { key: 'food_item_name', label: 'Item', width: 160, render: (r: any) => <Text style={{ fontSize: 13 }}>{r.quantity}× {r.food_item_name}</Text> },
     { key: 'total_amount', label: 'Amount', width: 100, render: (r: any) => <Text style={{ fontSize: 13 }}>{money(r.total_amount)}</Text> },
-    { key: 'status', label: 'Status', width: 110, render: (r: any) => <Badge label={titleCase(r.status)} tone={r.status === 'paid' ? 'success' : 'neutral'} /> },
+    { key: 'status', label: 'Status', width: 130, render: (r: any) => <Badge label={r.status === 'reserved' ? 'Ready for Pickup' : titleCase(r.status)} tone={r.status === 'reserved' ? 'success' : r.status === 'picked_up' ? 'info' : 'neutral'} /> },
     { key: 'pickup_code', label: 'Pickup Code', width: 120, render: (r: any) => <Text style={{ fontSize: 14, fontWeight: '800', letterSpacing: 2, color: C.primary }}>{r.pickup_code || '—'}</Text> },
     { key: 'created_at', label: 'Created', width: 150, render: (r: any) => <Text style={{ fontSize: 12.5, color: C.textSec }}>{r.created_at ? fmtDateTime(r.created_at) : '—'}</Text> },
     { key: 'actions', label: '', width: 120, render: (r: any) => <Btn title="Delete" variant="danger" small icon={Trash2} onPress={() => setDelFor(r)} /> },
@@ -67,8 +67,10 @@ export default function Testing() {
       <Card style={{ marginBottom: SP.lg, flexDirection: 'row', alignItems: 'center', gap: SP.md }}>
         <FlaskConical size={20} color={C.warn} />
         <Text style={{ flex: 1, color: C.textSec, fontSize: 13 }}>
-          Test orders are inserted with status <Text style={{ fontWeight: '800', color: C.text }}>PAID</Text>, a generated pickup code,
-          an item from the "Perfectly Good" vendor and customer "Test Customer". They are clearly labelled <Text style={{ fontWeight: '800', color: C.text }}>TEST</Text> and can be deleted anytime.
+          Test orders are inserted as a paid order that is {' '}
+          <Text style={{ fontWeight: '800', color: C.text }}>Ready for Pickup</Text>, with a generated pickup code,
+          an item from the Perfectly Good vendor and customer Test Customer. They appear in the vendor Orders tab for
+          pickup verification, are clearly labelled <Text style={{ fontWeight: '800', color: C.text }}>TEST</Text>, and can be deleted anytime.
         </Text>
       </Card>
 
