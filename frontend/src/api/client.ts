@@ -230,6 +230,8 @@ export const vendorApi = {
   saveVerification: (data: any) => apiFetch('/vendor/verification', { method: 'PUT', body: JSON.stringify(data) }),
   submitVerification: (data: any) => apiFetch('/vendor/verification/submit', { method: 'POST', body: JSON.stringify(data) }),
   getAgreement: () => apiFetch('/vendor/agreement'),
+  changePassword: (current_password: string, new_password: string) =>
+    apiFetch('/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }),
 
   toggleDrop: (id: string, data: { is_active: boolean }) =>
     apiFetch(`/vendor/drops/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

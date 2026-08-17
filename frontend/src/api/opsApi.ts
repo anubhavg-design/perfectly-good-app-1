@@ -99,6 +99,8 @@ export const opsApi = {
   rejectVendor: (id: string, reason: string) => apiFetch(`/ops/vendors/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   suspendVendor: (id: string, reason: string) => apiFetch(`/ops/vendors/${id}/suspend`, { method: 'POST', body: JSON.stringify({ reason }) }),
   setVendorPassword: (id: string, password: string) => apiFetch(`/ops/vendors/${id}/password`, { method: 'PUT', body: JSON.stringify({ password }) }),
+  setVendorEmail: (id: string, email: string) => apiFetch(`/ops/vendors/${id}/email`, { method: 'PUT', body: JSON.stringify({ email }) }),
+  bulkDeleteMenu: (id: string, menu_item_ids: string[]) => apiFetch(`/ops/vendors/${id}/menu/bulk-delete`, { method: 'POST', body: JSON.stringify({ menu_item_ids }) }),
   complianceList: (status?: string) => apiFetch(`/ops/compliance${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   complianceDetail: (id: string) => apiFetch(`/ops/compliance/${id}`),
   getAgreement: () => apiFetch('/ops/vendor-agreement'),

@@ -87,6 +87,22 @@ export default function DashboardScreen() {
   const [editPhone, setEditPhone] = useState('');
   const [saving, setSaving] = useState(false);
   const [vendorStatus, setVendorStatus] = useState<string>('active');
+  // Change password state
+  const [curPwd, setCurPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [changingPwd, setChangingPwd] = useState(false);
+
+  const handleChangePassword = async () => {
+    if (newPwd.length < 6) { Alert.alert('Weak password', 'New password must be at least 6 characters.'); return; }
+    if (newPwd !== confirmPwd) { Alert.alert('Mismatch', 'New password and confirmation do not match.'); return; }
+    setChangingPwd(true);
+    try {
+      await vendorApi.changePassword(curPwd, newPwd);
+      setCurPwd(''); setNewPwd(''); setConfirmPwd('');
+      Alert.alert('Done', 'Your password has been changed.');
+    } catch (err: any) { Alert.alert('Error', err.message); } finally { setChangingPwd(false); }
+  };
 
   const loadData = useCallback(async () => {
     try {
@@ -574,6 +590,34 @@ export default function DashboardScreen() {
               disabled={saving}
             >
               {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.settingsCard}>
+            <Text style={styles.settingsTitle}>Change Password</Text>
+            <View style={styles.settingsField}>
+              <View style={styles.settingsLabelRow}>
+                <KeyRound size={16} color={COLORS.textSecondary} />
+                <Text style={styles.settingsLabel}>Current Password</Text>
+              </View>
+              <TextInput testID="cur-pwd" style={styles.settingsInput} value={curPwd} onChangeText={setCurPwd} placeholder="Current password" placeholderTextColor={COLORS.textMuted} secureTextEntry autoCapitalize="none" />
+            </View>
+            <View style={styles.settingsField}>
+              <View style={styles.settingsLabelRow}>
+                <KeyRound size={16} color={COLORS.textSecondary} />
+                <Text style={styles.settingsLabel}>New Password</Text>
+              </View>
+              <TextInput testID="new-pwd" style={styles.settingsInput} value={newPwd} onChangeText={setNewPwd} placeholder="Min 6 characters" placeholderTextColor={COLORS.textMuted} secureTextEntry autoCapitalize="none" />
+            </View>
+            <View style={styles.settingsField}>
+              <View style={styles.settingsLabelRow}>
+                <KeyRound size={16} color={COLORS.textSecondary} />
+                <Text style={styles.settingsLabel}>Confirm New Password</Text>
+              </View>
+              <TextInput testID="confirm-pwd" style={styles.settingsInput} value={confirmPwd} onChangeText={setConfirmPwd} placeholder="Re-enter new password" placeholderTextColor={COLORS.textMuted} secureTextEntry autoCapitalize="none" />
+            </View>
+            <TouchableOpacity testID="change-pwd-btn" style={[styles.saveBtn, changingPwd && { opacity: 0.7 }]} onPress={handleChangePassword} disabled={changingPwd}>
+              {changingPwd ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Change Password</Text>}
             </TouchableOpacity>
           </View>
         </ScrollView>

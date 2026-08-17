@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, TextInput, Linking } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Plus, Pencil, UtensilsCrossed, Power, Trash2, Search, KeyRound } from 'lucide-react-native';
+import { Plus, Pencil, UtensilsCrossed, Power, Trash2, Search, KeyRound, Mail } from 'lucide-react-native';
 import { opsApi } from '../../src/api/opsApi';
 import { C, SP, R, money, fmtDate, titleCase, hasPerm } from '../../src/ops/theme';
 import { Card, Btn, Badge, DataTable, Spinner, PageHeader, Sheet, ConfirmDialog, Chips, Dropdown, EmptyState } from '../../src/ops/ui';
@@ -31,6 +31,9 @@ export default function Vendors() {
   const [pwdFor, setPwdFor] = useState<any>(null);
   const [pwdValue, setPwdValue] = useState('');
   const [pwdSaving, setPwdSaving] = useState(false);
+  const [emailFor, setEmailFor] = useState<any>(null);
+  const [emailValue, setEmailValue] = useState('');
+  const [emailSaving, setEmailSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,6 +83,18 @@ export default function Vendors() {
     setPwdValue(p);
   };
 
+  const saveEmail = async () => {
+    const email = emailValue.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert('Please enter a valid email address'); return; }
+    setEmailSaving(true);
+    try {
+      await opsApi.setVendorEmail(emailFor.vendor_id, email);
+      alert(`Email updated for ${emailFor.name}`);
+      setEmailFor(null); setEmailValue('');
+      await load();
+    } catch (e: any) { alert(e.message); } finally { setEmailSaving(false); }
+  };
+
   const columns = [
     { key: 'name', label: 'Vendor', width: 180, render: (r: any) => (
       <Pressable onPress={() => router.push(`/ops/vendor/${r.vendor_id}`)}>
@@ -98,11 +113,12 @@ export default function Vendors() {
     { key: 'order_count', label: 'Orders', width: 70, render: (r: any) => <Text style={{ fontSize: 13 }}>{r.order_count ?? 0}</Text> },
     { key: 'revenue', label: 'Revenue', width: 100, render: (r: any) => <Text style={{ fontSize: 13, fontWeight: '600' }}>{money(r.revenue)}</Text> },
     { key: 'created_at', label: 'Added', width: 110, render: (r: any) => <Text style={{ fontSize: 12.5, color: C.textSec }}>{fmtDate(r.created_at)}</Text> },
-    { key: 'actions', label: 'Actions', width: 210, render: (r: any) => (
+    { key: 'actions', label: 'Actions', width: 272, render: (r: any) => (
       <View style={{ flexDirection: 'row', gap: 4 }}>
         <IconBtn icon={UtensilsCrossed} tip="Menu" onPress={() => router.push(`/ops/vendor/${r.vendor_id}`)} />
         {canManage && <IconBtn icon={Pencil} tip="Edit" onPress={() => { setEditing(r); setShowForm(true); }} />}
         {canManage && <IconBtn icon={Power} tip="Toggle" color={r.status === 'inactive' ? C.success : C.warn} onPress={() => doToggleStatus(r)} />}
+        {isAdmin && <IconBtn icon={Mail} tip="Edit Email" onPress={() => { setEmailFor(r); setEmailValue(r.email || ''); }} />}
         {isAdmin && <IconBtn icon={KeyRound} tip="Set Temporary Password" color={C.info} onPress={() => { setPwdFor(r); setPwdValue(''); }} />}
         {isAdmin && <IconBtn icon={Trash2} tip="Delete" color={C.danger} onPress={() => setConfirm(r)} />}
       </View>
@@ -178,6 +194,28 @@ export default function Vendors() {
           <Btn title="Generate" variant="secondary" small onPress={genPassword} />
         </View>
       </Sheet>
+
+      <Sheet visible={!!emailFor} onClose={() => setEmailFor(null)} title="Edit Vendor Email"
+        footer={<View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: SP.sm }}>
+          <Btn title="Cancel" variant="secondary" small onPress={() => setEmailFor(null)} />
+          <Btn title="Save Email" small loading={emailSaving} onPress={saveEmail} />
+        </View>}>
+        <Text style={{ color: C.textSec, fontSize: 13, marginBottom: SP.md }}>
+          Change the login email for <Text style={{ fontWeight: '800', color: C.text }}>{emailFor?.name}</Text>. The vendor will
+          sign in with the new email going forward.
+        </Text>
+        <Text style={styles.flabel}>Email Address</Text>
+        <TextInput
+          testID="vendor-email-input"
+          value={emailValue}
+          onChangeText={setEmailValue}
+          placeholder="vendor@example.com"
+          placeholderTextColor={C.textMute}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          style={styles.emailInput}
+        />
+      </Sheet>
     </View>
   );
 }
@@ -196,5 +234,6 @@ const styles = StyleSheet.create({
   iconBtn: { width: 32, height: 32, borderRadius: R.sm, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surface },
   flabel: { fontSize: 11.5, fontWeight: '700', color: C.textMute, textTransform: 'uppercase', marginBottom: 6 },
   pwdInput: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: R.md, paddingHorizontal: 12, height: 42, color: C.text, fontSize: 14, outlineStyle: 'none' as any },
+  emailInput: { borderWidth: 1, borderColor: C.border, borderRadius: R.md, paddingHorizontal: 12, height: 42, color: C.text, fontSize: 14, outlineStyle: 'none' as any },
   pager: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SP.lg, marginTop: SP.lg },
 });

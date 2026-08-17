@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, Linking, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, Pencil, Plus, Copy, Trash2, MapPin, Phone, Mail, Store, ExternalLink, FileSpreadsheet, Images } from 'lucide-react-native';
+import { ChevronLeft, Pencil, Plus, Copy, Trash2, MapPin, Phone, Mail, Store, ExternalLink, FileSpreadsheet, Images, CheckSquare, Square } from 'lucide-react-native';
 import { opsApi } from '../../../src/api/opsApi';
 import { C, SP, R, money, fmtDate, fmtDateTime, titleCase, hasPerm } from '../../../src/ops/theme';
 import { Card, Btn, Badge, Spinner, Sheet, ConfirmDialog, Toggle, DataTable, EmptyState } from '../../../src/ops/ui';
@@ -27,6 +27,9 @@ export default function VendorProfile() {
   const [itemForm, setItemForm] = useState<any>(null); // {} for new, item for edit
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState<any>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [note, setNote] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [bulkImgOpen, setBulkImgOpen] = useState(false);
@@ -60,6 +63,16 @@ export default function VendorProfile() {
   const toggleItem = async (item: any) => { await opsApi.toggleItem(item.menu_item_id, !item.available_today); await load(); };
   const duplicateItem = async (item: any) => { await opsApi.duplicateItem(item.menu_item_id); await load(); };
   const deleteItem = async () => { setSaving(true); try { await opsApi.deleteItem(confirm.menu_item_id); setConfirm(null); await load(); } finally { setSaving(false); } };
+
+  const items = (v?.menu_items || []);
+  const toggleSelect = (mid: string) => setSelected((s) => { const n = new Set(s); n.has(mid) ? n.delete(mid) : n.add(mid); return n; });
+  const allSelected = items.length > 0 && selected.size === items.length;
+  const toggleSelectAll = () => setSelected(allSelected ? new Set() : new Set(items.map((it: any) => it.menu_item_id)));
+  const doBulkDelete = async () => {
+    setBulkDeleting(true);
+    try { await opsApi.bulkDeleteMenu(id!, [...selected]); setSelected(new Set()); setBulkConfirm(false); await load(); }
+    catch (e: any) { alert(e.message); } finally { setBulkDeleting(false); }
+  };
   const addNote = async () => { if (!note.trim()) return; await opsApi.addNote(id!, note.trim()); setNote(''); await load(); };
   const toggleStatus = async () => { await opsApi.vendorStatus(id!, v.status === 'inactive' ? 'active' : 'inactive'); await load(); };
 
@@ -146,10 +159,26 @@ export default function VendorProfile() {
         )}
       </View>
       <View style={{ gap: SP.md }}>
+        {canMenu && items.length > 0 && (
+          <View style={styles.bulkBar}>
+            <Pressable testID="select-all-menu" style={styles.selRow} onPress={toggleSelectAll}>
+              {allSelected ? <CheckSquare size={18} color={C.primary} /> : <Square size={18} color={C.textMute} />}
+              <Text style={styles.selText}>{allSelected ? 'Deselect All' : 'Select All'}{selected.size > 0 ? ` (${selected.size} selected)` : ''}</Text>
+            </Pressable>
+            {selected.size > 0 && (
+              <Btn title={`Delete Selected (${selected.size})`} variant="danger" small icon={Trash2} onPress={() => setBulkConfirm(true)} />
+            )}
+          </View>
+        )}
         {(v.menu_items || []).length === 0 ? (
           <Card><EmptyState title="No menu items yet" subtitle="Add the vendor's first item to start" /></Card>
         ) : v.menu_items.map((it: any) => (
           <Card key={it.menu_item_id} style={styles.itemCard}>
+            {canMenu && (
+              <Pressable testID={`sel-${it.menu_item_id}`} onPress={() => toggleSelect(it.menu_item_id)} style={{ justifyContent: 'center', paddingRight: 4 }}>
+                {selected.has(it.menu_item_id) ? <CheckSquare size={20} color={C.primary} /> : <Square size={20} color={C.textMute} />}
+              </Pressable>
+            )}
             <Image source={{ uri: it.image_url }} style={styles.itemImg} />
             <View style={{ flex: 1, minWidth: 160 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP.sm, flexWrap: 'wrap' }}>
@@ -233,6 +262,10 @@ export default function VendorProfile() {
       <ConfirmDialog visible={!!confirm} title="Delete item?" danger loading={saving}
         message={`Delete "${confirm?.name}"? This cannot be undone.`} confirmLabel="Delete"
         onConfirm={deleteItem} onCancel={() => setConfirm(null)} />
+
+      <ConfirmDialog visible={bulkConfirm} title="Delete selected items?" danger loading={bulkDeleting}
+        message={`Permanently delete ${selected.size} selected menu item(s)? This cannot be undone.`}
+        confirmLabel={`Delete ${selected.size} item(s)`} onConfirm={doBulkDelete} onCancel={() => setBulkConfirm(false)} />
     </View>
   );
 }
@@ -275,6 +308,9 @@ const styles = StyleSheet.create({
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: SP.xl, marginBottom: SP.md },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: C.text },
   itemCard: { flexDirection: 'row', alignItems: 'center', gap: SP.md, flexWrap: 'wrap' },
+  bulkBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: SP.sm, paddingHorizontal: SP.xs, gap: SP.md },
+  selRow: { flexDirection: 'row', alignItems: 'center', gap: SP.sm },
+  selText: { fontSize: 13.5, fontWeight: '700', color: C.textSec },
   itemImg: { width: 56, height: 56, borderRadius: R.md, backgroundColor: C.surfaceAlt },
   itemName: { fontSize: 15, fontWeight: '700', color: C.text },
   mini: { width: 30, height: 30, borderRadius: R.sm, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },

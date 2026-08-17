@@ -461,6 +461,20 @@ async def reset_password(body: ResetPasswordBody):
     await db.password_reset_tokens.update_one({"token": body.token}, {"$set": {"used": True}})
     return {"message": "Password reset successfully"}
 
+@api.post("/auth/change-password")
+async def change_password(body: dict, request: Request):
+    """Logged-in user changes their own password (requires current password)."""
+    user = await get_current_user(request)
+    current = (body.get("current_password") or "").strip()
+    new_password = (body.get("new_password") or "").strip()
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    full = await db.users.find_one({"user_id": user["user_id"]})
+    if not full or not verify_password(current, full.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"password_hash": hash_password(new_password)}})
+    return {"message": "Password changed successfully"}
+
 # ── Push Notifications ──────────────────────────────────────────────────
 
 class PushTokenBody(BaseModel):
@@ -3339,6 +3353,44 @@ async def ops_set_vendor_password(vendor_id: str, body: dict, request: Request):
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Vendor login account not found")
     return {"message": "Temporary password set"}
+
+
+@api.put("/ops/vendors/{vendor_id}/email")
+async def ops_set_vendor_email(vendor_id: str, body: dict, request: Request):
+    """Admin-only: change a vendor's email (updates both the vendor record and its login account)."""
+    user = await require_permission(request, "manage_vendors")
+    _admin_only(user)
+    email = (body.get("email") or "").strip().lower()
+    if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email):
+        raise HTTPException(status_code=400, detail="Please enter a valid email address")
+    vendor = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    uid = vendor.get("user_id")
+    clash = await db.users.find_one({"email": email, "user_id": {"$ne": uid}}, {"_id": 0})
+    if clash:
+        raise HTTPException(status_code=400, detail="That email is already in use by another account")
+    now = datetime.now(timezone.utc)
+    await db.vendors.update_one({"vendor_id": vendor_id}, {"$set": {"email": email, "updated_at": now}})
+    if uid:
+        await db.users.update_one({"user_id": uid}, {"$set": {"email": email}})
+    return {"message": "Vendor email updated", "email": email}
+
+
+@api.post("/ops/vendors/{vendor_id}/menu/bulk-delete")
+async def ops_bulk_delete_menu(vendor_id: str, body: dict, request: Request):
+    """Delete multiple menu items for a vendor in one action."""
+    user = await require_permission(request, "manage_vendors")
+    v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    if user.get("role") == "operations" and v.get("assigned_ops") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="This vendor is not assigned to you")
+    ids = body.get("menu_item_ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="No menu items selected")
+    res = await db.menu_items.delete_many({"vendor_id": vendor_id, "menu_item_id": {"$in": ids}})
+    return {"message": f"Deleted {res.deleted_count} item(s)", "deleted": res.deleted_count}
 
 
 @api.put("/ops/staff/{user_id}/password")
