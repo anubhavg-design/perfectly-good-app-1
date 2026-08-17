@@ -91,7 +91,14 @@ export default function VendorCreateDropScreen() {
           <ArrowLeft size={22} color={COLORS.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Create Drop</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity
+          testID="submit-drop-btn"
+          onPress={handleCreate}
+          disabled={!selectedItem || creating}
+          style={[styles.headerAddBtn, (!selectedItem || creating) && { opacity: 0.4 }]}
+        >
+          {creating ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.headerAddText}>Add Drop</Text>}
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -197,20 +204,6 @@ export default function VendorCreateDropScreen() {
                 />
               </View>
             </View>
-
-            <TouchableOpacity
-              testID="submit-drop-btn"
-              style={[styles.submitBtn, creating && styles.submitBtnDisabled]}
-              onPress={handleCreate}
-              disabled={creating}
-              activeOpacity={0.8}
-            >
-              {creating ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.submitBtnText}>Create Drop</Text>
-              )}
-            </TouchableOpacity>
           </View>
         )}
       </ScrollView>
@@ -223,6 +216,8 @@ const styles = StyleSheet.create({
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   headerBack: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  headerAddBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.full, paddingHorizontal: SPACING.md, paddingVertical: 8, minWidth: 40, alignItems: 'center', justifyContent: 'center' },
+  headerAddText: { color: '#fff', fontSize: 14, fontFamily: 'Outfit_600SemiBold' },
   headerTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
   scrollContent: { padding: SPACING.md, paddingBottom: SPACING.xxl },
   sectionTitle: { fontSize: 15, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginBottom: SPACING.sm, marginTop: SPACING.md, textTransform: 'uppercase', letterSpacing: 0.5 },

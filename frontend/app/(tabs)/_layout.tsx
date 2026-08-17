@@ -37,7 +37,7 @@ export default function TabLayout() {
     return <Redirect href="/vendor-verification" />;
   }
 
-  const showDashboard = user?.role === 'vendor' || user?.role === 'admin';
+  const showDashboard = user?.role === 'vendor' || user?.role === 'admin' || user?.role === 'vendor_staff';
 
   return (
     <Tabs

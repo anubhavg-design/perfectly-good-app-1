@@ -7,7 +7,7 @@ export interface User {
   user_id: string;
   email: string;
   name: string;
-  role: 'user' | 'vendor' | 'admin';
+  role: 'user' | 'vendor' | 'admin' | 'vendor_staff';
   picture: string | null;
   location: any;
   created_at: string;

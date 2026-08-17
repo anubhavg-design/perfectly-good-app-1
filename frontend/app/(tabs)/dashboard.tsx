@@ -1,11 +1,11 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
   ActivityIndicator, RefreshControl, Switch, Alert, ScrollView, TextInput, Modal, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X, KeyRound, ShieldCheck, ChevronRight } from 'lucide-react-native';
+import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X, KeyRound, ShieldCheck, ChevronRight, Users, Trash2 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
@@ -92,6 +92,48 @@ export default function DashboardScreen() {
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [changingPwd, setChangingPwd] = useState(false);
+
+  // Staff management (vendor owner only)
+  const isOwner = user?.role === 'vendor';
+  const STAFF_PERMS: { key: string; label: string }[] = [
+    { key: 'add_drops', label: 'Add surplus drops' },
+    { key: 'complete_orders', label: 'Mark orders as completed' },
+    { key: 'edit_menu', label: 'Edit menu images/descriptions' },
+  ];
+  const [staff, setStaff] = useState<any[]>([]);
+  const [showAddStaff, setShowAddStaff] = useState(false);
+  const [sName, setSName] = useState('');
+  const [sEmail, setSEmail] = useState('');
+  const [sPwd, setSPwd] = useState('');
+  const [sPerms, setSPerms] = useState<string[]>([]);
+  const [savingStaff, setSavingStaff] = useState(false);
+
+  const loadStaff = async () => {
+    try { const r = await vendorApi.listStaff(); setStaff(r.items || []); } catch {}
+  };
+  useEffect(() => { if (activeTab === 'settings' && isOwner) loadStaff(); }, [activeTab, isOwner]);
+
+  const toggleSPerm = (k: string) => setSPerms((p) => p.includes(k) ? p.filter((x) => x !== k) : [...p, k]);
+  const addStaff = async () => {
+    if (!sName.trim() || !sEmail.trim() || sPwd.length < 6) { Alert.alert('Missing info', 'Enter name, email and a password (min 6 chars).'); return; }
+    setSavingStaff(true);
+    try {
+      await vendorApi.createStaff({ name: sName.trim(), email: sEmail.trim(), password: sPwd, permissions: sPerms });
+      setSName(''); setSEmail(''); setSPwd(''); setSPerms([]); setShowAddStaff(false);
+      await loadStaff();
+    } catch (e: any) { Alert.alert('Error', e.message); } finally { setSavingStaff(false); }
+  };
+  const toggleStaffPerm = async (st: any, k: string) => {
+    const next = (st.permissions || []).includes(k) ? st.permissions.filter((x: string) => x !== k) : [...(st.permissions || []), k];
+    setStaff((list) => list.map((x) => x.user_id === st.user_id ? { ...x, permissions: next } : x));
+    try { await vendorApi.updateStaff(st.user_id, { permissions: next }); } catch (e: any) { Alert.alert('Error', e.message); loadStaff(); }
+  };
+  const removeStaff = (st: any) => {
+    Alert.alert('Remove staff', `Remove ${st.name}? They will lose access.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: async () => { try { await vendorApi.deleteStaff(st.user_id); await loadStaff(); } catch (e: any) { Alert.alert('Error', e.message); } } },
+    ]);
+  };
 
   const handleChangePassword = async () => {
     if (newPwd.length < 6) { Alert.alert('Weak password', 'New password must be at least 6 characters.'); return; }
@@ -620,6 +662,61 @@ export default function DashboardScreen() {
               {changingPwd ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Change Password</Text>}
             </TouchableOpacity>
           </View>
+
+          {isOwner && (
+            <View style={styles.settingsCard}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.sm }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Users size={18} color={COLORS.textPrimary} />
+                  <Text style={styles.settingsTitle}>Staff Management</Text>
+                </View>
+                <TouchableOpacity testID="add-staff-btn" onPress={() => setShowAddStaff((v) => !v)} style={styles.staffAddBtn}>
+                  <Plus size={16} color="#fff" />
+                  <Text style={styles.staffAddText}>{showAddStaff ? 'Close' : 'Add Staff'}</Text>
+                </TouchableOpacity>
+              </View>
+
+              {showAddStaff && (
+                <View style={styles.staffForm}>
+                  <TextInput style={styles.settingsInput} value={sName} onChangeText={setSName} placeholder="Staff name" placeholderTextColor={COLORS.textMuted} />
+                  <TextInput style={styles.settingsInput} value={sEmail} onChangeText={setSEmail} placeholder="Email" placeholderTextColor={COLORS.textMuted} autoCapitalize="none" keyboardType="email-address" />
+                  <TextInput style={styles.settingsInput} value={sPwd} onChangeText={setSPwd} placeholder="Password (min 6)" placeholderTextColor={COLORS.textMuted} secureTextEntry autoCapitalize="none" />
+                  <Text style={styles.staffPermHead}>Permissions</Text>
+                  {STAFF_PERMS.map((p) => (
+                    <TouchableOpacity key={p.key} style={styles.permRow} onPress={() => toggleSPerm(p.key)}>
+                      <View style={[styles.permBox, sPerms.includes(p.key) && styles.permBoxOn]}>{sPerms.includes(p.key) ? <CheckCircle size={15} color="#fff" /> : null}</View>
+                      <Text style={styles.permLabel}>{p.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity testID="save-staff-btn" style={[styles.saveBtn, savingStaff && { opacity: 0.7 }]} onPress={addStaff} disabled={savingStaff}>
+                    {savingStaff ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Create Staff Account</Text>}
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {staff.length === 0 ? (
+                <Text style={styles.staffEmpty}>No staff added yet.</Text>
+              ) : staff.map((st) => (
+                <View key={st.user_id} style={styles.staffCard}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.staffName}>{st.name}</Text>
+                      <Text style={styles.staffEmail}>{st.email}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => removeStaff(st)} style={styles.staffDel}><Trash2 size={16} color={COLORS.error} /></TouchableOpacity>
+                  </View>
+                  <View style={{ marginTop: 8, gap: 4 }}>
+                    {STAFF_PERMS.map((p) => (
+                      <TouchableOpacity key={p.key} style={styles.permRow} onPress={() => toggleStaffPerm(st, p.key)}>
+                        <View style={[styles.permBox, (st.permissions || []).includes(p.key) && styles.permBoxOn]}>{(st.permissions || []).includes(p.key) ? <CheckCircle size={14} color="#fff" /> : null}</View>
+                        <Text style={styles.permLabelSm}>{p.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
         </ScrollView>
       ) : activeTab === 'earnings' ? (
         <FlatList
@@ -800,6 +897,20 @@ const styles = StyleSheet.create({
   currentLocationText: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, flex: 1 },
   saveBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 14, alignItems: 'center', marginTop: SPACING.sm },
   saveBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Outfit_600SemiBold' },
+  staffAddBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primary, borderRadius: RADIUS.full, paddingHorizontal: 12, paddingVertical: 7 },
+  staffAddText: { color: '#fff', fontSize: 13, fontFamily: 'Outfit_600SemiBold' },
+  staffForm: { gap: SPACING.sm, marginBottom: SPACING.md, paddingBottom: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
+  staffPermHead: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginTop: 4 },
+  permRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+  permBox: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center', justifyContent: 'center' },
+  permBoxOn: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  permLabel: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textPrimary },
+  permLabelSm: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary },
+  staffEmpty: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, paddingVertical: SPACING.sm },
+  staffCard: { backgroundColor: COLORS.background, borderRadius: RADIUS.md, padding: SPACING.md, marginTop: SPACING.sm, borderWidth: 1, borderColor: COLORS.borderLight },
+  staffName: { fontSize: 15, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
+  staffEmail: { fontSize: 12.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary },
+  staffDel: { padding: 8 },
   // Menu item edit
   menuThumb: { width: 48, height: 48, borderRadius: RADIUS.md, backgroundColor: COLORS.skeleton, marginRight: SPACING.sm },
   menuThumbEmpty: { alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.borderLight },

@@ -232,6 +232,10 @@ export const vendorApi = {
   getAgreement: () => apiFetch('/vendor/agreement'),
   changePassword: (current_password: string, new_password: string) =>
     apiFetch('/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }),
+  listStaff: () => apiFetch('/vendor/staff'),
+  createStaff: (data: any) => apiFetch('/vendor/staff', { method: 'POST', body: JSON.stringify(data) }),
+  updateStaff: (id: string, data: any) => apiFetch(`/vendor/staff/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteStaff: (id: string) => apiFetch(`/vendor/staff/${id}`, { method: 'DELETE' }),
 
   toggleDrop: (id: string, data: { is_active: boolean }) =>
     apiFetch(`/vendor/drops/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

@@ -105,6 +105,8 @@ def user_response(user: dict) -> dict:
         "permission_overrides": user.get("permission_overrides") or {},
         "picture": user.get("picture"),
         "location": user.get("location"),
+        "parent_vendor_id": user.get("parent_vendor_id"),
+        "staff_permissions": user.get("staff_permissions") or [],
         "created_at": user.get("created_at", datetime.now(timezone.utc)).isoformat(),
     }
 
@@ -128,6 +130,25 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+VENDOR_ROLES = ("vendor", "admin", "vendor_staff")
+
+async def _resolve_vendor(user: dict):
+    """Return the vendor doc for a vendor/admin owner OR a vendor_staff member."""
+    if user.get("role") == "vendor_staff":
+        vid = user.get("parent_vendor_id")
+        return await db.vendors.find_one({"vendor_id": vid}, {"_id": 0}) if vid else None
+    return await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+
+def _require_staff_perm(user: dict, perm: str):
+    """Owners (vendor/admin) may do anything; vendor_staff need the specific permission."""
+    role = user.get("role")
+    if role in ("vendor", "admin"):
+        return
+    if role == "vendor_staff" and perm in (user.get("staff_permissions") or []):
+        return
+    raise HTTPException(status_code=403, detail="You do not have permission for this action")
 
 # ── RBAC ────────────────────────────────────────────────────────────────
 STAFF_ROLES = {"admin", "operations", "customer_success", "finance"}
@@ -1394,9 +1415,9 @@ class UpdateVendorProfileBody(BaseModel):
 @api.get("/vendor/profile")
 async def vendor_profile(request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     return vendor
@@ -1404,9 +1425,9 @@ async def vendor_profile(request: Request):
 @api.put("/vendor/profile")
 async def update_vendor_profile(body: UpdateVendorProfileBody, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     updates = {}
@@ -1426,9 +1447,9 @@ async def update_vendor_profile(body: UpdateVendorProfileBody, request: Request)
 @api.get("/vendor/menu")
 async def vendor_menu(request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     items = await db.menu_items.find({"vendor_id": vendor["vendor_id"]}, {"_id": 0}).to_list(200)
@@ -1437,9 +1458,9 @@ async def vendor_menu(request: Request):
 @api.get("/vendor/drops")
 async def vendor_drops(request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     items = await db.menu_items.find({"vendor_id": vendor["vendor_id"]}, {"_id": 0}).to_list(500)
@@ -1448,9 +1469,10 @@ async def vendor_drops(request: Request):
 @api.post("/vendor/drops")
 async def create_vendor_drop(body: CreateDropBody, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    _require_staff_perm(user, "add_drops")
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     menu_item = await db.menu_items.find_one({"menu_item_id": body.menu_item_id, "vendor_id": vendor["vendor_id"]}, {"_id": 0})
@@ -1492,10 +1514,11 @@ async def create_vendor_drop(body: CreateDropBody, request: Request):
 @api.put("/vendor/drops/{item_id}")
 async def toggle_vendor_drop(item_id: str, body: ToggleDropBody, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
+    _require_staff_perm(user, "add_drops")
     if body.is_active:
-        vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        vendor = await _resolve_vendor(user)
         if not vendor or vendor.get("status") != "active":
             raise HTTPException(status_code=403, detail="Your account must be approved before you can go live.")
     result = await db.menu_items.update_one({"menu_item_id": item_id}, {"$set": {"available_today": body.is_active, "updated_at": datetime.now(timezone.utc)}})
@@ -1519,9 +1542,10 @@ async def vendor_edit_menu_item(item_id: str, body: VendorMenuEditBody, request:
     """Vendor edits ONLY the image, kcal and protein of their own menu item.
     Name / price / description remain Ops-controlled."""
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    _require_staff_perm(user, "edit_menu")
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     updates: dict = {"updated_at": datetime.now(timezone.utc)}
@@ -1619,9 +1643,9 @@ async def toggle_menu_stock(item_id: str, body: ToggleStockBody, request: Reques
     the IST date it was marked so the daily midnight reset (and restart catch-up)
     can bring it back automatically. in_stock=True => available again."""
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     set_fields = {"in_stock": body.in_stock, "updated_at": datetime.now(timezone.utc)}
@@ -1637,9 +1661,9 @@ async def toggle_menu_stock(item_id: str, body: ToggleStockBody, request: Reques
 @api.get("/vendor/orders")
 async def vendor_orders(request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     orders = await db.orders.find({"vendor_id": vendor["vendor_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
@@ -1661,9 +1685,10 @@ async def verify_pickup(order_id: str, body: VerifyPickupBody, request: Request)
     """Vendor verifies the customer's pickup code to complete the order.
     Completion only happens on a correct code; idempotent & race-safe."""
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    _require_staff_perm(user, "complete_orders")
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     order = await db.orders.find_one({"order_id": order_id, "vendor_id": vendor["vendor_id"]}, {"_id": 0})
@@ -1694,7 +1719,7 @@ async def verify_pickup(order_id: str, body: VerifyPickupBody, request: Request)
 @api.put("/vendor/orders/{order_id}/status")
 async def update_vendor_order_status(order_id: str, body: UpdateOrderStatusBody, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
     if body.status != "cancelled":
         raise HTTPException(status_code=400, detail="Orders are completed via pickup code verification.")
@@ -1720,9 +1745,9 @@ def order_revenue(o: dict) -> float:
 @api.get("/vendor/payouts/summary")
 async def vendor_payouts_summary(request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     vid = vendor["vendor_id"]
@@ -1750,9 +1775,9 @@ async def vendor_payouts_summary(request: Request):
 @api.get("/vendor/payouts/orders")
 async def vendor_payouts_orders(request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     completed = await db.orders.find(
@@ -2328,6 +2353,95 @@ async def ops_vendor_status(vendor_id: str, body: dict, request: Request):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+#  VENDOR STAFF MANAGEMENT (a vendor manages its own staff accounts)
+# ══════════════════════════════════════════════════════════════════════════
+
+VENDOR_STAFF_PERMS = ["add_drops", "complete_orders", "edit_menu"]
+
+def _staff_view(u: dict) -> dict:
+    return {
+        "user_id": u.get("user_id"),
+        "name": u.get("name", ""),
+        "email": u.get("email", ""),
+        "permissions": u.get("staff_permissions") or [],
+        "created_at": u.get("created_at").isoformat() if hasattr(u.get("created_at"), "isoformat") else u.get("created_at"),
+    }
+
+async def _require_vendor_owner(request: Request):
+    """Only a vendor OWNER (role 'vendor') may manage staff — not staff themselves."""
+    user = await get_current_user(request)
+    if user.get("role") != "vendor":
+        raise HTTPException(status_code=403, detail="Only the vendor owner can manage staff")
+    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    return user, vendor
+
+def _clean_perms(perms):
+    return [p for p in (perms or []) if p in VENDOR_STAFF_PERMS]
+
+@api.get("/vendor/staff")
+async def list_vendor_staff(request: Request):
+    _, vendor = await _require_vendor_owner(request)
+    rows = await db.users.find({"role": "vendor_staff", "parent_vendor_id": vendor["vendor_id"]}, {"_id": 0}).to_list(200)
+    return {"items": [_staff_view(u) for u in rows], "permissions_available": VENDOR_STAFF_PERMS}
+
+@api.post("/vendor/staff")
+async def create_vendor_staff(body: dict, request: Request):
+    _, vendor = await _require_vendor_owner(request)
+    name = (body.get("name") or "").strip()
+    email = (body.get("email") or "").strip().lower()
+    password = (body.get("password") or "").strip()
+    perms = _clean_perms(body.get("permissions"))
+    if not name:
+        raise HTTPException(status_code=400, detail="Staff name is required")
+    if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email):
+        raise HTTPException(status_code=400, detail="Please enter a valid email address")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="That email is already in use")
+    now = datetime.now(timezone.utc)
+    doc = {
+        "user_id": gen_id("user"), "email": email, "name": name,
+        "password_hash": hash_password(password), "role": "vendor_staff",
+        "parent_vendor_id": vendor["vendor_id"], "staff_permissions": perms,
+        "created_at": now,
+    }
+    await db.users.insert_one(doc)
+    return _staff_view(doc)
+
+@api.put("/vendor/staff/{user_id}")
+async def update_vendor_staff(user_id: str, body: dict, request: Request):
+    _, vendor = await _require_vendor_owner(request)
+    staff = await db.users.find_one({"user_id": user_id, "role": "vendor_staff", "parent_vendor_id": vendor["vendor_id"]}, {"_id": 0})
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff member not found")
+    updates: dict = {}
+    if "permissions" in body:
+        updates["staff_permissions"] = _clean_perms(body.get("permissions"))
+    if body.get("name"):
+        updates["name"] = body["name"].strip()
+    if body.get("password"):
+        if len((body["password"] or "").strip()) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        updates["password_hash"] = hash_password(body["password"].strip())
+    if updates:
+        await db.users.update_one({"user_id": user_id}, {"$set": updates})
+    fresh = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return _staff_view(fresh)
+
+@api.delete("/vendor/staff/{user_id}")
+async def delete_vendor_staff(user_id: str, request: Request):
+    _, vendor = await _require_vendor_owner(request)
+    res = await db.users.delete_one({"user_id": user_id, "role": "vendor_staff", "parent_vendor_id": vendor["vendor_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Staff member not found")
+    return {"message": "Staff member removed"}
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
 #  VENDOR COMPLIANCE, VERIFICATION & AGREEMENT
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -2476,9 +2590,9 @@ class SubmitVerificationBody(SaveVerificationBody):
 
 async def _get_vendor_for_user(request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ("vendor", "admin"):
+    if user["role"] not in VENDOR_ROLES:
         raise HTTPException(status_code=403, detail="Not a vendor")
-    vendor = await db.vendors.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    vendor = await _resolve_vendor(user)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor profile not found")
     return user, vendor

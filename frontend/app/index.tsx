@@ -17,7 +17,7 @@ export default function Index() {
       const role = (user as any)?.role;
       const staff = ['admin', 'operations', 'customer_success', 'finance'];
       if (role && staff.includes(role)) { router.replace('/ops'); return; }
-      if (role === 'vendor') { router.replace('/(tabs)/dashboard'); return; }
+      if (role === 'vendor' || role === 'vendor_staff') { router.replace('/(tabs)/dashboard'); return; }
       if (user) {
         const seen = await hasSeenOnboarding(user.user_id);
         router.replace(seen ? '/(tabs)/home' : '/onboarding');

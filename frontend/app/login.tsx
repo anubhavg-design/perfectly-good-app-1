@@ -43,7 +43,7 @@ export default function LoginScreen() {
     const staff = ['admin', 'operations', 'customer_success', 'finance'];
     // Staff and vendors ALWAYS go to their panels — never a customer `next`.
     if (role && staff.includes(role)) { router.replace('/ops'); return; }
-    if (role === 'vendor') { router.replace('/(tabs)/dashboard'); return; }
+    if (role === 'vendor' || role === 'vendor_staff') { router.replace('/(tabs)/dashboard'); return; }
     // Customers: resume the action they attempted as a guest, else home/onboarding.
     if (nextPath) { router.replace(nextPath); return; }
     const seen = await hasSeenOnboarding(u?.user_id);
