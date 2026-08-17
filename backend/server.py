@@ -151,7 +151,7 @@ def _require_staff_perm(user: dict, perm: str):
     raise HTTPException(status_code=403, detail="You do not have permission for this action")
 
 # ── RBAC ────────────────────────────────────────────────────────────────
-STAFF_ROLES = {"admin", "operations", "customer_success", "finance"}
+STAFF_ROLES = {"admin", "semi_admin", "operations", "customer_success", "finance"}
 
 PERMISSIONS = [
     "view_dashboard", "view_vendors", "manage_vendors",
@@ -167,6 +167,10 @@ ROLE_PERMISSIONS = {
     "user": set(),
     "vendor": {"manage_menu", "view_orders", "update_order_status", "view_finance"},
     "admin": set(PERMISSIONS),
+    # Semi-Admin: full view + edit access everywhere, but NEVER delete (enforced
+    # per-endpoint via _forbid_semi_admin_delete). manage_roles is withheld so it
+    # cannot escalate/create admins.
+    "semi_admin": set(PERMISSIONS) - {"manage_roles"},
     "operations": {
         "view_dashboard", "view_vendors", "manage_vendors", "manage_menu",
         "upload_images", "ai_import", "view_orders", "update_order_status",
@@ -191,6 +195,12 @@ def get_effective_permissions(role: str, overrides: Optional[dict] = None) -> se
             else:
                 perms.discard(perm)
     return perms
+
+
+def _forbid_semi_admin_delete(user: dict):
+    """Semi-Admins have full view/edit access but may never delete anything."""
+    if user.get("role") == "semi_admin":
+        raise HTTPException(status_code=403, detail="Semi-Admins are not allowed to delete")
 
 
 async def require_permission(request: Request, permission: str) -> dict:
@@ -2931,7 +2941,8 @@ async def ops_duplicate_menu_item(menu_item_id: str, request: Request):
 
 @api.delete("/ops/menu/{menu_item_id}")
 async def ops_delete_menu_item(menu_item_id: str, request: Request):
-    await require_permission(request, "manage_menu")
+    user = await require_permission(request, "manage_menu")
+    _forbid_semi_admin_delete(user)
     result = await db.menu_items.delete_one({"menu_item_id": menu_item_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Menu item not found")
@@ -3495,6 +3506,7 @@ async def ops_set_vendor_email(vendor_id: str, body: dict, request: Request):
 async def ops_bulk_delete_menu(vendor_id: str, body: dict, request: Request):
     """Delete multiple menu items for a vendor in one action."""
     user = await require_permission(request, "manage_vendors")
+    _forbid_semi_admin_delete(user)
     v = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     if not v:
         raise HTTPException(status_code=404, detail="Vendor not found")

@@ -187,3 +187,6 @@
 - Staff CRUD (owner-only via _require_vendor_owner, role must be 'vendor'): GET/POST /vendor/staff, PUT/DELETE /vendor/staff/{user_id}. Vendors only see/manage own staff (scoped by parent_vendor_id). Staff cannot manage staff (403).
 - UI: dashboard Settings tab → "Staff Management" card (owner only, isOwner=role==='vendor'): add staff (name/email/password + permission checkboxes), per-staff permission toggles (live PUT), remove. vendorApi.listStaff/createStaff/updateStaff/deleteStaff.
 - Tested end-to-end: staff create/list, staff login resolves parent vendor (/vendor/drops 200), 403 without complete_orders on verify-pickup, 404 (perm passed) after granting, staff cannot list staff (403). Fixed missing useEffect import in dashboard.tsx.
+
+## Semi-Admin role (Aug 2026)
+- New 'semi_admin' role: full view+edit across ops dashboard (all PERMISSIONS except manage_roles), but cannot delete anything. Backend guard _forbid_semi_admin_delete on deletable ops endpoints (menu delete, menu bulk-delete); other deletes already admin/manage_roles gated. Frontend hides all delete/bulk-delete controls for semi_admin. Login routes semi_admin → /ops. Admin creates one via Settings → staff (role semi_admin). Test: semi@perfectlygood.in / semi12345.

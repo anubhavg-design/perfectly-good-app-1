@@ -16,6 +16,7 @@ export default function VendorProfile() {
   const router = useRouter();
   const { user } = useAuth();
   const canMenu = hasPerm(user, 'manage_menu');
+  const canDelete = user?.role !== 'semi_admin';
   const canVendor = hasPerm(user, 'manage_vendors');
   const canNote = hasPerm(user, 'add_notes');
   const canFinance = hasPerm(user, 'view_finance');
@@ -159,7 +160,7 @@ export default function VendorProfile() {
         )}
       </View>
       <View style={{ gap: SP.md }}>
-        {canMenu && items.length > 0 && (
+        {canMenu && canDelete && items.length > 0 && (
           <View style={styles.bulkBar}>
             <Pressable testID="select-all-menu" style={styles.selRow} onPress={toggleSelectAll}>
               {allSelected ? <CheckSquare size={18} color={C.primary} /> : <Square size={18} color={C.textMute} />}
@@ -174,7 +175,7 @@ export default function VendorProfile() {
           <Card><EmptyState title="No menu items yet" subtitle="Add the vendor's first item to start" /></Card>
         ) : v.menu_items.map((it: any) => (
           <Card key={it.menu_item_id} style={styles.itemCard}>
-            {canMenu && (
+            {canMenu && canDelete && (
               <Pressable testID={`sel-${it.menu_item_id}`} onPress={() => toggleSelect(it.menu_item_id)} style={{ justifyContent: 'center', paddingRight: 4 }}>
                 {selected.has(it.menu_item_id) ? <CheckSquare size={20} color={C.primary} /> : <Square size={20} color={C.textMute} />}
               </Pressable>
@@ -202,7 +203,7 @@ export default function VendorProfile() {
                 <View style={{ flexDirection: 'row', gap: 4 }}>
                   <Mini icon={Pencil} onPress={() => setItemForm(it)} />
                   <Mini icon={Copy} onPress={() => duplicateItem(it)} />
-                  <Mini icon={Trash2} color={C.danger} onPress={() => setConfirm(it)} />
+                  {canDelete && <Mini icon={Trash2} color={C.danger} onPress={() => setConfirm(it)} />}
                 </View>
               )}
             </View>

@@ -15,7 +15,7 @@ export default function Index() {
     if (loading) return;
     (async () => {
       const role = (user as any)?.role;
-      const staff = ['admin', 'operations', 'customer_success', 'finance'];
+      const staff = ['admin', 'semi_admin', 'operations', 'customer_success', 'finance'];
       if (role && staff.includes(role)) { router.replace('/ops'); return; }
       if (role === 'vendor' || role === 'vendor_staff') { router.replace('/(tabs)/dashboard'); return; }
       if (user) {

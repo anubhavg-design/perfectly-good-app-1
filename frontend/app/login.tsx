@@ -40,7 +40,7 @@ export default function LoginScreen() {
     if (!role) {
       try { const me = await authApi.me(); role = (me as any)?.role; } catch {}
     }
-    const staff = ['admin', 'operations', 'customer_success', 'finance'];
+    const staff = ['admin', 'semi_admin', 'operations', 'customer_success', 'finance'];
     // Staff and vendors ALWAYS go to their panels — never a customer `next`.
     if (role && staff.includes(role)) { router.replace('/ops'); return; }
     if (role === 'vendor' || role === 'vendor_staff') { router.replace('/(tabs)/dashboard'); return; }

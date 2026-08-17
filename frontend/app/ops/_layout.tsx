@@ -26,7 +26,7 @@ const NAV = [
   { label: 'Settings', route: '/ops/settings', icon: SettingsIcon, perm: 'view_dashboard' },
 ];
 
-const STAFF = ['admin', 'operations', 'customer_success', 'finance'];
+const STAFF = ['admin', 'semi_admin', 'operations', 'customer_success', 'finance'];
 
 export default function OpsLayout() {
   const { user, loading, logout } = useAuth();

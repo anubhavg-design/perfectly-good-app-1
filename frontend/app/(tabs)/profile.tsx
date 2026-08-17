@@ -10,7 +10,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import GuestGate from '../../src/components/GuestGate';
 
 const VENDOR_CONTACT_EMAIL = 'chaitanya@perfectlygood.in';
-const STAFF_ROLES = ['admin', 'operations', 'customer_success', 'finance'];
+const STAFF_ROLES = ['admin', 'semi_admin', 'operations', 'customer_success', 'finance'];
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();

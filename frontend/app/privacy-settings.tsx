@@ -11,7 +11,7 @@ export default function PrivacySettings() {
   const router = useRouter();
   const { user, logout } = useAuth();
   const [deleting, setDeleting] = useState(false);
-  const isStaff = ['admin', 'operations', 'customer_success', 'finance'].includes((user as any)?.role);
+  const isStaff = ['admin', 'semi_admin', 'operations', 'customer_success', 'finance'].includes((user as any)?.role);
 
   const doDelete = async () => {
     setDeleting(true);
