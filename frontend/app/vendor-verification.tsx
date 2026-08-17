@@ -188,8 +188,8 @@ export default function VendorVerification() {
   );
 
   // Locked / status states (compliance already submitted or account decided)
-  if (status === 'pending_verification' || status === 'active' || status === 'suspended') {
-    const cfg = status === 'active'
+  if (status === 'pending_verification' || status === 'active' || status === 'approved' || status === 'suspended') {
+    const cfg = (status === 'active' || status === 'approved')
       ? { icon: CheckCircle2, color: COLORS.primary, title: 'Your account is active', msg: 'Your verification was approved. You can now go live and receive orders.' }
       : status === 'suspended'
       ? { icon: Ban, color: COLORS.error, title: 'Account suspended', msg: 'Your account has been suspended. Please contact the Perfectly Good team for assistance.' }

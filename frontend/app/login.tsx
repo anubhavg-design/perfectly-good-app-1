@@ -7,6 +7,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useAuth } from '../src/context/AuthContext';
+import { authApi } from '../src/api/client';
 import { hasSeenOnboarding } from '../src/utils/onboarding';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { Eye, EyeOff, X } from 'lucide-react-native';
@@ -31,11 +32,20 @@ export default function LoginScreen() {
     }
   }, []);
 
-  const routeForUser = async (u: any) => {
-    const role = (u as any)?.role;
+  const routeForUser = async (u: any, nextPath?: string) => {
+    let role = (u as any)?.role;
+    // Robustness: if the login payload didn't include a role, fetch the
+    // authoritative user before deciding, so staff/vendors are never
+    // mistakenly dropped onto the customer home screen.
+    if (!role) {
+      try { const me = await authApi.me(); role = (me as any)?.role; } catch {}
+    }
     const staff = ['admin', 'operations', 'customer_success', 'finance'];
+    // Staff and vendors ALWAYS go to their panels — never a customer `next`.
     if (role && staff.includes(role)) { router.replace('/ops'); return; }
     if (role === 'vendor') { router.replace('/(tabs)/dashboard'); return; }
+    // Customers: resume the action they attempted as a guest, else home/onboarding.
+    if (nextPath) { router.replace(nextPath); return; }
     const seen = await hasSeenOnboarding(u?.user_id);
     router.replace(seen ? '/(tabs)/home' : '/onboarding');
   };
@@ -58,9 +68,8 @@ export default function LoginScreen() {
       const cleanPassword = password.trim();
       if (isLogin) {
         const u = await login(cleanEmail, cleanPassword);
-        // Continue the action the guest originally attempted, if any.
-        if (next) { router.replace(next as string); return; }
-        await routeForUser(u);
+        // Route by role; customers resume `next` inside routeForUser.
+        await routeForUser(u, next as string | undefined);
       } else {
         await register(name.trim(), cleanEmail, phone.trim(), cleanPassword);
         if (next) { router.replace(next as string); return; }
@@ -95,8 +104,7 @@ export default function LoginScreen() {
         .join(' ');
       setSubmitting(true);
       const u = await appleLogin(credential.identityToken, fullName || undefined, credential.email || undefined);
-      if (next) { router.replace(next as string); return; }
-      await routeForUser(u);
+      await routeForUser(u, next as string | undefined);
     } catch (e: any) {
       if (e?.code === 'ERR_REQUEST_CANCELED') return; // user cancelled
       setError(e?.message || 'Apple Sign In failed. Please try again.');

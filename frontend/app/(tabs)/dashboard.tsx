@@ -435,7 +435,7 @@ export default function DashboardScreen() {
         )}
       </View>
 
-      {vendorStatus !== 'active' && (
+      {!['active', 'approved'].includes(vendorStatus) && (
         <TouchableOpacity
           testID="verification-banner"
           style={[styles.verifBanner, vendorStatus === 'suspended' && { backgroundColor: '#FEF2F2', borderColor: COLORS.error + '44' }]}

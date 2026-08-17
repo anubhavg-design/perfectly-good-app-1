@@ -4,7 +4,7 @@ import { Home, ShoppingBag, User, LayoutDashboard } from 'lucide-react-native';
 import { COLORS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import { vendorApi } from '../../src/api/client';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import BrandedLoader from '../../src/components/BrandedLoader';
 
 export default function TabLayout() {
   const { user, loading } = useAuth();
@@ -30,11 +30,7 @@ export default function TabLayout() {
   }, [isVendor, (user as any)?.user_id]);
 
   if (loading || (isVendor && !verifChecked)) {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-      </View>
-    );
+    return <BrandedLoader />;
   }
 
   if (isVendor && needsCompliance) {
@@ -108,7 +104,3 @@ export default function TabLayout() {
     </Tabs>
   );
 }
-
-const styles = StyleSheet.create({
-  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
-});

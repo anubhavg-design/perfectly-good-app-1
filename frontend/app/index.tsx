@@ -1,9 +1,8 @@
 import React from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/context/AuthContext';
 import { hasSeenOnboarding } from '../src/utils/onboarding';
-import { COLORS } from '../src/constants/theme';
+import BrandedLoader from '../src/components/BrandedLoader';
 
 // Guest-first entry gate (Apple 5.1.1): the app launches straight into the
 // Home feed. Staff/vendors go to their dashboards; logged-in customers see the
@@ -29,13 +28,5 @@ export default function Index() {
     })();
   }, [user, loading]);
 
-  return (
-    <View style={styles.loading}>
-      <ActivityIndicator size="large" color={COLORS.primary} />
-    </View>
-  );
+  return <BrandedLoader />;
 }
-
-const styles = StyleSheet.create({
-  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
-});
