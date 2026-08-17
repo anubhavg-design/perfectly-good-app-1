@@ -190,3 +190,20 @@
 
 ## Semi-Admin role (Aug 2026)
 - New 'semi_admin' role: full view+edit across ops dashboard (all PERMISSIONS except manage_roles), but cannot delete anything. Backend guard _forbid_semi_admin_delete on deletable ops endpoints (menu delete, menu bulk-delete); other deletes already admin/manage_roles gated. Frontend hides all delete/bulk-delete controls for semi_admin. Login routes semi_admin → /ops. Admin creates one via Settings → staff (role semi_admin). Test: semi@perfectlygood.in / semi12345.
+
+## Push Notifications — Emergent managed / SuprSend (Aug 2026)
+- Replaced the old Expo Push API (exp.host) implementation with the Emergent managed push relay (SuprSend) via emergentintegrations pattern. Device tokens are NOT stored in Mongo — the relay maps tokens to user_id.
+- Backend (server.py):
+  - PUSH_BASE_URL=https://integrations.emergentagent.com, PUSH_KEY=os.environ["EMERGENT_PUSH_KEY"] (=placeholder in .env; auto-set at deploy — NEVER edit).
+  - Shared httpx.AsyncClient (_push_client) with X-Push-Key header; closed on shutdown.
+  - POST /api/register-push {user_id, platform, device_token} → relays to /api/v1/push/users/register.
+  - async send_push(recipients, data{title,message,action_url?}, idempotency_key) → /api/v1/push/trigger, chunks 100.
+  - send_push_to_vendor (owner + vendor_staff) and send_push_to_all_users (role==user) rewritten on top of send_push. All push calls wrapped in try/except (non-blocking).
+- 4 triggers wired:
+  1. New order → vendor (in _finalize_order), action_url /dashboard.
+  2. Order confirmed → customer (in _finalize_order), action_url /orders.
+  3. Pickup reminder → customer, apscheduler interval job send_pickup_reminders() every 10 min, fires ~1h before pickup_start_time (IST), per-order pickup_reminder_sent flag to dedupe, action_url /orders.
+  4. Surplus deal alert → all customers (in POST /vendor/drops), action_url /drop/{item_id}.
+- Frontend: src/utils/notifications.ts uses getDevicePushTokenAsync → POST /register-push; AuthContext registers on login/app-open with user_id. app/_layout.tsx has module-scope setNotificationHandler + 'default' Android channel, useEffect with addNotificationResponseReceivedListener + getLastNotificationResponseAsync (deeplink/action_url routing) + weekly denied-permission Alert nudge to Linking.openSettings().
+- app.json: android.googleServicesFile = ./google-services.json (user to add file). expo-notifications plugin already present.
+- CAVEAT: Push only works on native iOS/Android builds after Publish/Deploy/Build (not Expo Go / web). Placeholder key returns 401→500 in preview, which is expected.

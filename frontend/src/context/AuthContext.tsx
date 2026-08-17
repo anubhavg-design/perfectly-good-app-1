@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authApi, loadToken, setToken } from '../api/client';
-import { registerForPushNotifications, savePushToken, configureNotificationHandler } from '../utils/notifications';
+import { registerForPushNotifications, savePushToken } from '../utils/notifications';
 
 export interface User {
   user_id: string;
@@ -25,11 +25,11 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
-async function tryRegisterPush(role: string) {
+async function tryRegisterPush(userId: string) {
   try {
     const token = await registerForPushNotifications();
-    if (token) {
-      await savePushToken(token);
+    if (token && userId) {
+      await savePushToken(userId, token);
     }
   } catch (err) {
     console.log('Push registration skipped:', err);
@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const userData = await authApi.me();
       setUser(userData);
       await AsyncStorage.setItem('user', JSON.stringify(userData));
-      tryRegisterPush(userData.role);
+      tryRegisterPush(userData.user_id);
     } catch {
       setUser(null);
       await AsyncStorage.removeItem('user');
@@ -54,7 +54,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    configureNotificationHandler();
     (async () => {
       try {
         await loadToken();
@@ -78,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(userData);
     await AsyncStorage.setItem('user', JSON.stringify(userData));
-    tryRegisterPush(userData.role);
+    tryRegisterPush(userData.user_id);
     return userData;
   };
 
@@ -89,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(userData);
     await AsyncStorage.setItem('user', JSON.stringify(userData));
-    tryRegisterPush(userData.role);
+    tryRegisterPush(userData.user_id);
     return userData;
   };
 
@@ -100,7 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(userData);
     await AsyncStorage.setItem('user', JSON.stringify(userData));
-    tryRegisterPush(userData.role);
+    tryRegisterPush(userData.user_id);
     return userData;
   };
 

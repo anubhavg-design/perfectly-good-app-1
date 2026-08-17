@@ -33,7 +33,8 @@
         "ACCESS_COARSE_LOCATION",
         "CAMERA"
       ],
-      "package": "in.perfectlygood.android"
+      "package": "in.perfectlygood.android",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "bundler": "metro",

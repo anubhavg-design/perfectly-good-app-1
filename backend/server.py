@@ -22,6 +22,7 @@ from pydantic import BaseModel
 import math
 import re
 import requests as http_requests
+import httpx
 import asyncio
 import smtplib
 import zipfile
@@ -506,83 +507,95 @@ async def change_password(body: dict, request: Request):
     await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"password_hash": hash_password(new_password)}})
     return {"message": "Password changed successfully"}
 
-# ── Push Notifications ──────────────────────────────────────────────────
+# ── Push Notifications (Emergent managed / SuprSend relay) ──────────────
+# NOTE: device tokens are NOT stored in our DB. The Emergent push relay maps
+# tokens to user_id internally via /register-push. Never edit EMERGENT_PUSH_KEY
+# in .env — it is auto-populated by the deployment pipeline.
 
-class PushTokenBody(BaseModel):
-    push_token: str
+PUSH_BASE_URL = "https://integrations.emergentagent.com"
+PUSH_KEY = os.environ.get("EMERGENT_PUSH_KEY", "placeholder")
 
-@api.post("/auth/push-token")
-async def save_push_token(body: PushTokenBody, request: Request):
-    user = await get_current_user(request)
-    await db.users.update_one(
-        {"user_id": user["user_id"]},
-        {"$set": {"push_token": body.push_token}},
-    )
-    return {"message": "Push token saved"}
+_push_client = httpx.AsyncClient(
+    base_url=PUSH_BASE_URL,
+    headers={"X-Push-Key": PUSH_KEY},
+    timeout=10.0,
+)
+
+
+class RegisterPushBody(BaseModel):
+    user_id: str
+    platform: str   # "android" | "ios"
+    device_token: str
+
+
+@api.post("/register-push", status_code=201)
+async def register_push(body: RegisterPushBody):
+    resp = await _push_client.post("/api/v1/push/users/register", json=body.model_dump())
+    if resp.status_code == 401:
+        raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
+    if resp.status_code >= 500:
+        raise HTTPException(502, "Push provider unavailable")
+    resp.raise_for_status()
+    return {"status": "registered"}
+
+
+async def send_push(recipients: list, data: dict, idempotency_key: str = None) -> None:
+    """Relay a push to one or more user_ids via the Emergent managed push service.
+    `data` must include `title` and `message`; optional `action_url` for tap routing.
+    Chunks audiences larger than 100 recipients per /trigger call."""
+    if not recipients:
+        return
+    recipients = list(dict.fromkeys([r for r in recipients if r]))  # dedupe, drop empties
+    if not recipients:
+        return
+    if "title" not in data or "message" not in data:
+        raise ValueError("data must include title and message")
+    for i in range(0, len(recipients), 100):
+        chunk = recipients[i:i + 100]
+        payload = {"recipients": chunk, "data": data}
+        if idempotency_key:
+            payload["$idempotency_key"] = f"{idempotency_key}:{i}" if i else idempotency_key
+        resp = await _push_client.post("/api/v1/push/trigger", json=payload)
+        if resp.status_code == 401:
+            raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
+        if resp.status_code >= 500:
+            raise HTTPException(502, "Push provider unavailable")
+        resp.raise_for_status()
+
 
 async def send_push_to_vendor(vendor_id: str, title: str, body: str, data: dict = None):
-    """Send push notification to all devices registered for this vendor."""
+    """Notify the vendor owner (and active staff sub-accounts) about an event."""
     vendor = await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     if not vendor:
         return
-    vendor_user = await db.users.find_one({"user_id": vendor.get("user_id")}, {"_id": 0})
-    if not vendor_user or not vendor_user.get("push_token"):
-        logger.info(f"No push token for vendor {vendor_id}, skipping notification")
-        return
-
-    push_token = vendor_user["push_token"]
-    message = {
-        "to": push_token,
-        "sound": "default",
-        "title": title,
-        "body": body,
-        "channelId": "orders",
-    }
-    if data:
-        message["data"] = data
-
+    recipients = []
+    if vendor.get("user_id"):
+        recipients.append(vendor["user_id"])
+    # Include vendor staff sub-accounts linked to this vendor
+    staff = await db.users.find(
+        {"role": "vendor_staff", "vendor_id": vendor_id}, {"_id": 0, "user_id": 1}
+    ).to_list(100)
+    recipients += [s["user_id"] for s in staff if s.get("user_id")]
+    payload = {"title": title, "message": body}
+    if data and data.get("action_url"):
+        payload["action_url"] = data["action_url"]
     try:
-        resp = http_requests.post(
-            "https://exp.host/--/api/v2/push/send",
-            json=message,
-            headers={"Content-Type": "application/json"},
-            timeout=5,
-        )
-        logger.info(f"Push sent to vendor {vendor_id}: {resp.status_code}")
+        await send_push(recipients, payload, idempotency_key=(data or {}).get("idempotency_key"))
     except Exception as e:
-        logger.error(f"Push notification failed: {e}")
+        logger.warning(f"Push to vendor {vendor_id} failed (non-blocking): {e}")
+
 
 async def send_push_to_all_users(title: str, body: str, data: dict = None):
-    """Broadcast push notification to all users (non-vendor) with push tokens."""
-    users = await db.users.find(
-        {"push_token": {"$exists": True, "$ne": None}, "role": "user"},
-        {"_id": 0, "push_token": 1},
-    ).to_list(10000)
-    tokens = [u["push_token"] for u in users if u.get("push_token")]
-    if not tokens:
-        logger.info("No user push tokens found, skipping broadcast")
-        return
-
-    messages = []
-    for token in tokens:
-        msg = {"to": token, "sound": "default", "title": title, "body": body, "channelId": "orders"}
-        if data:
-            msg["data"] = data
-        messages.append(msg)
-
-    # Expo push API supports batches of up to 100
-    for i in range(0, len(messages), 100):
-        batch = messages[i:i+100]
-        try:
-            resp = http_requests.post(
-                "https://exp.host/--/api/v2/push/send",
-                json=batch,
-                headers={"Content-Type": "application/json"},
-                timeout=10,
-            )
-            logger.info(f"Broadcast push sent to {len(batch)} users: {resp.status_code}")
-        except Exception as e:
-            logger.error(f"Broadcast push failed: {e}")
+    """Broadcast a push to all customers (role == 'user')."""
+    users = await db.users.find({"role": "user"}, {"_id": 0, "user_id": 1}).to_list(100000)
+    recipients = [u["user_id"] for u in users if u.get("user_id")]
+    payload = {"title": title, "message": body}
+    if data and data.get("action_url"):
+        payload["action_url"] = data["action_url"]
+    try:
+        await send_push(recipients, payload, idempotency_key=(data or {}).get("idempotency_key"))
+    except Exception as e:
+        logger.warning(f"Broadcast push failed (non-blocking): {e}")
 
 # ══════════════════════════════════════════════════════════════════════════
 #  DROPS
@@ -946,13 +959,28 @@ async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optio
     await db.vendors.update_one({"vendor_id": item.get("vendor_id", "")}, {"$set": {"last_order_date": datetime.now(timezone.utc)}})
     await db.pending_orders.delete_one({"razorpay_order_id": rzp_order_id})
 
-    # Send push notification to vendor
+    # Notify the vendor about the new order
     await send_push_to_vendor(
         vendor_id=item.get("vendor_id", ""),
         title="New Order!",
         body=f"{order_user.get('name', 'A customer')} reserved {quantity}× {item.get('name', 'item')} — ₹{pending.get('total_amount', 0)}",
-        data={"order_id": order_id, "type": "new_order"},
+        data={"action_url": "/dashboard", "idempotency_key": f"new_order:{order_id}"},
     )
+
+    # Notify the customer that their order is confirmed
+    if pending.get("user_id"):
+        try:
+            await send_push(
+                [pending["user_id"]],
+                {
+                    "title": "Order confirmed 🎉",
+                    "message": f"Your order from {vendor.get('name', 'the restaurant') if vendor else 'the restaurant'} is confirmed. Show code {pickup_code} at pickup.",
+                    "action_url": "/orders",
+                },
+                idempotency_key=f"order_confirmed:{order_id}",
+            )
+        except Exception as e:
+            logger.warning(f"Order-confirmed push failed (non-blocking): {e}")
     return order_id
 
 
@@ -1516,7 +1544,7 @@ async def create_vendor_drop(body: CreateDropBody, request: Request):
     await send_push_to_all_users(
         title=f"{vendor.get('name', 'A vendor')} just dropped!",
         body=f"{menu_item['name']} — ₹{body.discounted_price} ({discount}% off)",
-        data={"item_id": body.menu_item_id, "type": "new_drop"},
+        data={"action_url": f"/drop/{body.menu_item_id}", "idempotency_key": f"new_drop:{body.menu_item_id}:{int(datetime.now(timezone.utc).timestamp())}"},
     )
 
     return item_to_drop(updated, vendor)
@@ -4080,6 +4108,48 @@ async def reset_sold_out_items(catch_up: bool = False):
 scheduler = AsyncIOScheduler(timezone=IST)
 
 
+# ── Pickup reminders (1 hour before pickup start) ───────────────────────
+async def send_pickup_reminders():
+    """Runs periodically. Notify customers ~1 hour before their pickup window
+    starts. Uses a per-order `pickup_reminder_sent` flag to avoid duplicates."""
+    now = datetime.now(IST)
+    orders = await db.orders.find(
+        {"status": "reserved", "pickup_reminder_sent": {"$ne": True}},
+        {"_id": 0},
+    ).to_list(2000)
+    for o in orders:
+        try:
+            start = (o.get("pickup_start_time") or "").strip()
+            if not start:
+                continue
+            sh, sm = map(int, start.split(":"))
+            created = o.get("created_at")
+            if not isinstance(created, datetime):
+                continue
+            created_ist = (created if created.tzinfo else created.replace(tzinfo=timezone.utc)).astimezone(IST)
+            pickup_dt = created_ist.replace(hour=sh, minute=sm, second=0, microsecond=0)
+            if pickup_dt < created_ist:
+                pickup_dt += timedelta(days=1)
+            remind_at = pickup_dt - timedelta(hours=1)
+            if remind_at <= now < pickup_dt:
+                uid = o.get("user_id")
+                if uid:
+                    await send_push(
+                        [uid],
+                        {
+                            "title": "Pickup reminder ⏰",
+                            "message": f"Your order from {o.get('vendor_name', 'the restaurant')} is ready to collect from {start}. Code: {o.get('pickup_code', '')}",
+                            "action_url": "/orders",
+                        },
+                        idempotency_key=f"pickup_reminder:{o['order_id']}",
+                    )
+                await db.orders.update_one(
+                    {"order_id": o["order_id"]}, {"$set": {"pickup_reminder_sent": True}}
+                )
+        except Exception as e:
+            logger.warning(f"Pickup reminder failed for {o.get('order_id')}: {e}")
+
+
 # ── Startup / Shutdown ──────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
@@ -4090,6 +4160,9 @@ async def startup():
     # Reset every sold-out item back to available at 00:00 IST daily.
     scheduler.add_job(reset_sold_out_items, "cron", hour=0, minute=0,
                       id="sold_out_reset", replace_existing=True)
+    # Pickup reminders — check every 10 minutes for orders ~1h before pickup.
+    scheduler.add_job(send_pickup_reminders, "interval", minutes=10,
+                      id="pickup_reminders", replace_existing=True)
     if not scheduler.running:
         scheduler.start()
     logger.info("Perfectly Good API started")
@@ -4098,6 +4171,7 @@ async def startup():
 async def shutdown():
     if scheduler.running:
         scheduler.shutdown(wait=False)
+    await _push_client.aclose()
     mongo_client.close()
 
 # ── Wire up ─────────────────────────────────────────────────────────────
