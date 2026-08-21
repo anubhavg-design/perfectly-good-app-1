@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../src/context/AuthContext';
+import { CartProvider } from '../src/context/CartContext';
 import {
   useFonts,
   Outfit_400Regular,
@@ -132,6 +133,7 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
+      <CartProvider>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
         <Stack.Screen name="index" />
@@ -141,6 +143,7 @@ export default function RootLayout() {
         <Stack.Screen name="privacy-settings" />
         <Stack.Screen name="drop/[id]" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="restaurant/[id]" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="cart" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="checkout" options={{ presentation: 'modal' }} />
         <Stack.Screen name="order-confirmation" options={{ gestureEnabled: false }} />
         <Stack.Screen name="admin" />
@@ -153,6 +156,7 @@ export default function RootLayout() {
         <Stack.Screen name="browse-deals" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="surplus" options={{ animation: 'slide_from_right' }} />
       </Stack>
+      </CartProvider>
     </AuthProvider>
   );
 }

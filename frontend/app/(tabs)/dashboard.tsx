@@ -43,6 +43,7 @@ interface VendorDrop {
 interface VendorOrder {
   order_id: string;
   food_item_name: string;
+  items?: { food_item_name: string; quantity: number }[];
   customer_name: string;
   quantity: number;
   total_amount: number;
@@ -374,6 +375,11 @@ export default function DashboardScreen() {
         <View style={styles.cardRow}>
           <View style={styles.cardInfo}>
             <Text style={styles.cardTitle} numberOfLines={1}>{item.food_item_name}</Text>
+            {item.items && item.items.length > 1 ? (
+              item.items.map((li, i) => (
+                <Text key={i} style={styles.cardSub} numberOfLines={1}>· {li.quantity} × {li.food_item_name}</Text>
+              ))
+            ) : null}
             <Text style={styles.cardSub}>{item.customer_name} · Qty: {item.quantity}</Text>
             <Text style={styles.cardSub}>Order #{(item.order_id || '').replace(/^order_?/i, '').slice(0, 8).toUpperCase()} · ₹{item.total_amount}</Text>
             {item.pickup_start_time ? <Text style={styles.cardSub}>Pickup: {item.pickup_start_time} - {item.pickup_end_time}</Text> : null}

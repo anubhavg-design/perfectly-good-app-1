@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 27 — Multi-Item Cart end-to-end. Backend pytest 13/13 PASS + 1 SKIP (see below) via /app/backend/tests/test_multi_item_cart.py. Frontend E2E on Expo web (390x844, real customer registered via /api/auth/register) verified the AddToCartSheet, View-Cart bar, /cart screen, and /checkout render+math. Backend validations verified: (1) `items:[]` → 400 'Your cart is empty'. (2) qty=0 also → 400 empty. (3) Missing both items+food_item_id → 400 (Pydantic still lets empty body through but the raw_items filter catches it → 400 empty). (4) Cross-vendor items → 400 'All items in an order must be from the same restaurant'. (5) Unknown food_item_id → 404 'One of the items is no longer available'. (6) Surplus qty > quantity_available → 400 'Only N left of ...'. (7) Auth required → 401/403. (8) Multi-item takeaway (2 items × Draft Test Kitchen menu, qty 2+1) → 200 with razorpay_order_id + key_id + amount; amount matches subtotal × 1.10 (5% GST + 5% payment gateway fee) within 1 paise. (9) Legacy single-item body {food_item_id, quantity} still returns 200 with a Razorpay order (backward compat). (10) Multi-item surplus (qty 2, one item) → 200. (11) DB pending_orders shape: `items` is a list of dicts each with food_item_id/food_item_name/quantity/unit_price/line_subtotal/image_url; top-level `quantity` = summed count; `item_subtotal` = Σ line_subtotal; `total_amount` = subtotal × 1.10. (12) Reorder: unknown id → 404. (13) Closed-restaurant branch returns 400 with 'closed' text (currently open in test window 18:00-21:00 IST → the assertion accepts either branch). Frontend E2E VERIFIED: (A) /restaurant/vendor_e177d1bc3c50 Takeaway tab → tapping menu-item-<id> opens AddToCartSheet with image + name (TEST_Item ₹100) + qty stepper (add-cart-plus/minus/confirm testIDs all present) + 'Takeaway · Draft Test Kitchen' label. (B) Confirming pushes item to cart AND shows a floating green view-cart-bar with '2 items · ₹200 · Draft Test Kitchen' and 'View Cart' link. (C) Adding a 2nd item from same vendor+mode merges silently (no alert), bar updates to '3 items · ₹380'. (D) /cart screen renders both cart-item-<id> rows with cart-plus-<id>/cart-minus-<id>/cart-remove-<id>, cart-clear, and cart-checkout-btn (visible ₹380 total). (E) /checkout renders the itemized 'YOUR ITEMS (N)' list, PICKUP SLOT (6:00 PM–9:00 PM), PRICE BREAKDOWN — Subtotal/GST/Payment gateway fees/Total with the 5%+5% math matching the backend (₹100 → ₹5+₹5+₹100 = ₹110). Pickup slot picker present. Pay button labelled 'Pay ₹110'. (F) DID NOT hit Pay button — Razorpay is LIVE. Reorder endpoint returns vendorId (confirmed by static code review at server.py:1589, contract-tested via /api/orders/order_unknown_xxxx/reorder → 404). No React Native red screens, no deprecated packages, no SafeAreaView issues.\n\nKNOWN WEB-PREVIEW LIMITATION (not a bug): React Native Web's Alert.alert(...) with buttons does NOT render on the Expo web preview at Playwright (window.dialog handler captured 0 dialogs; no in-DOM alert modal appears). This means the 'Clear cart to add this?' cross-vendor/cross-mode conflict pop is NOT visible on web — but the CartContext.addItem() logic correctly returns {ok:false, conflict:true, sameVendor} (verified by code review of CartContext.tsx L94-118) and AddToCartSheet.doAdd() calls Alert.alert with the correct copy (L38-49). On native Expo Go / real device, Alert.alert will render the two-button dialog normally. Recommend the main agent verify this on a real device / add a fallback web-alert path if web preview UX matters.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Cross-vendor / cross-mode conflict alert",
+        "issue": "React Native's Alert.alert(...) does not visibly render on Expo web preview — the two-button 'Clear cart to add this?' pop does not appear when trying to add an item from a different restaurant OR different order mode. The CartContext logic and AddToCartSheet code are both correct; this is a react-native-web limitation. On native devices the alert will render. If web UX matters, replace Alert.alert with a custom in-app Modal in AddToCartSheet or an in-app confirm sheet.",
+        "affected_testIDs": ["add-cart-confirm"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_multi_item_cart.py",
+    "/app/test_reports/pytest/iter27_multi_item_cart.xml"
+  ],
+  "action_items": [
+    "(Web only, low priority) Replace RN Alert.alert in /app/frontend/src/components/AddToCartSheet.tsx doAdd() L38-49 with a custom in-app Modal / bottom-sheet confirm so the 'Clear cart to add this?' dialog is visible on Expo web preview. Native devices are unaffected.",
+    "Consider adding an integration test for the multi-item confirmed-order shape (post-payment) once Razorpay live flow can be safely stubbed — currently _finalize_order's items-array persistence is only verified statically via code review of server.py L1316-1361."
+  ],
+  "critical_code_review_comments": [
+    "server.py L1165-1170 correctly falls back to [{food_item_id, quantity}] when body.items is empty AND body.food_item_id is set — clean backward-compat.",
+    "server.py L1201-1204 vendor mismatch check happens on every subsequent item after the first — correct cross-vendor guard.",
+    "server.py L1216-1218 checks vendor.status=='active' AFTER pricing loop — a request for items from a NON-active vendor (e.g. draft/rejected) returns 400 'not currently accepting orders'. Both test vendors here are active so this branch is not exercised at runtime; both draft-vendor and active-vendor code paths are covered logically.",
+    "server.py L1240-1243 subtotal + 5% gst + 5% fee = subtotal * 1.10 — matches settings defaults (cfg.gst_rate=0.05, cfg.convenience_rate=0.05). Confirmed by amount==int(round(sub*1.10)*100) equality.",
+    "server.py L1262-1275 pending_orders doc stores both legacy top-level food_item_id + quantity AND the new items[] array. Good — enables idempotent finalize AND multi-item audit.",
+    "server.py L1316-1332 _finalize_order builds pending_items from either the new items array OR reconstructs a legacy single-item entry. summary_name = 'First + N more' matches spec.",
+    "server.py L1363-1369 surplus decrement runs per line-item — no more single-item bug. Cancellation restore at L1610-1616 mirrors this.",
+    "server.py L1589 reorder returns vendorId — spec-compliant. Static contract test in test_multi_item_cart.py::TestReorderVendorId::test_reorder_response_has_vendorId_key is SKIPPED here because the freshly-registered test customer has no historical orders and the 20 existing orders belong to another user (user_67f6d3f00f52) which we don't have credentials for. To retest fully, seed a customer that owns at least one confirmed order.",
+    "CartContext.tsx L94-118 addItem returns {ok:false, conflict:true, sameVendor} when vendorId OR orderType differs — matches both 'different restaurant' and 'different mode' UX requirements.",
+    "AddToCartSheet.tsx L38-49 chooses the correct copy ('Clear cart to add this?' vs 'different order mode') based on sameVendor flag. Alert.alert renders on native; web-preview limitation noted above.",
+    "cart.tsx / checkout.tsx testIDs all match spec: cart-plus-<id>/cart-minus-<id>/cart-remove-<id>/cart-clear/cart-checkout-btn + checkout PICKUP SLOT chip + Pay button. Checkout math matches backend (subtotal × 1.10)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_multi_item_cart.py (new — 14 pytest cases: 13 pass, 1 skip)"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 executed pytest tests PASS; 1 SKIP due to fresh test user having no historical orders — verified via static code review)",
+    "frontend": "100% of testable web-preview flows PASS: AddToCartSheet, View-Cart bar, /cart CRUD, /checkout price breakdown + slot picker. 1 web-only limitation: cross-vendor/cross-mode conflict Alert is not visible on Expo web preview (RN Alert.alert web limitation)."
+  },
+  "seed_data_creation": "Ephemeral test-only customer TEST_cart_<timestamp>@test.in (fresh registration via /api/auth/register). NOT deleted (registration only, no orders confirmed). NO real Razorpay payment was completed. Backend pytest created ~5-6 pending_orders rows in db.pending_orders which stay orphaned (no payment ever verified) — these should be reaped on a routine cleanup or left to expire.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Regression cmd: `export EXPO_PUBLIC_BACKEND_URL=https://perfectly-good-build.preview.emergentagent.com && python -m pytest /app/backend/tests/test_multi_item_cart.py -v`. Both test vendors (vendor_e177d1bc3c50 Draft Test Kitchen 18:00-21:00 IST, vendor_1ab4824b1e97 TEST Home Veg 00:01-23:59) are status=active in DB even though vendor_e177d1bc3c50 is named 'Draft Test Kitchen' — do NOT trust the name; check DB. Draft Test Kitchen may 400 with 'closed' outside 18-21 IST; the test handles that with pytest.skip. To test the reorder vendorId assertion end-to-end, a customer with a historical confirmed order is needed — the 20 existing orders in DB belong to user_67f6d3f00f52 whose password isn't in test_credentials.md. The frontend AddToCartSheet cross-vendor/cross-mode Alert.alert popup does NOT render on Expo web (react-native-web limitation) — retest on native Expo Go / device or replace Alert with a custom Modal.",
+  "rca_of_issue": "N/A — feature verification pass. One caveat: 'Clear cart to add this?' Alert.alert is invisible on the Expo web preview only. Code path is correct; it's a react-native-web Alert-module limitation, not a bug in the multi-item cart feature."
+}

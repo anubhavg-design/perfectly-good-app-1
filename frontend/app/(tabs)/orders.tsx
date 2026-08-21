@@ -9,6 +9,7 @@ import { ShoppingBag, Clock, CheckCircle, XCircle, AlertCircle, RotateCcw, KeyRo
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { ordersApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
+import { useCart } from '../../src/context/CartContext';
 import GuestGate from '../../src/components/GuestGate';
 
 const STATUS_CONFIG: Record<string, { color: string; icon: any; label: string }> = {
@@ -22,6 +23,7 @@ const STATUS_CONFIG: Record<string, { color: string; icon: any; label: string }>
 interface Order {
   order_id: string;
   food_item_name: string;
+  items?: { food_item_name: string; quantity: number; unit_price?: number }[];
   vendor_name: string;
   quantity: number;
   total_amount: number;
@@ -71,26 +73,29 @@ export default function OrdersScreen() {
     setRefreshing(false);
   };
 
+  const { replaceWithItem } = useCart();
   const handleReorder = async (orderId: string) => {
     setReorderingId(orderId);
     try {
       const d = await ordersApi.reorder(orderId);
-      router.push({
-        pathname: '/checkout',
-        params: {
+      // Seed the cart with this item, then open the cart.
+      replaceWithItem({
+        vendorId: d.vendorId || d.vendor_id || '',
+        vendorName: d.vendorName,
+        orderType: d.orderType,
+        isOpen: !!d.isOpen,
+        openStatusText: d.openStatusText || '',
+        todayShifts: d.todayShifts || [],
+        item: {
           itemId: d.itemId,
           name: d.name,
-          price: String(d.price),
-          originalPrice: String(d.originalPrice),
-          vendorName: d.vendorName,
-          maxQty: String(d.maxQty ?? 0),
+          price: Number(d.price) || 0,
+          originalPrice: Number(d.originalPrice) || 0,
           imageUrl: d.imageUrl || '',
-          orderType: d.orderType,
-          isOpen: d.isOpen ? '1' : '0',
-          openStatusText: d.openStatusText || '',
-          todayShifts: JSON.stringify(d.todayShifts || []),
+          maxQty: d.maxQty ?? 0,
         },
       });
+      router.push('/cart');
     } catch (err: any) {
       Alert.alert('Cannot reorder', err.message || 'This item is no longer available.');
     } finally {
@@ -143,6 +148,13 @@ export default function OrdersScreen() {
               </View>
             </View>
             <Text style={styles.orderVendor}>{item.vendor_name}</Text>
+            {item.items && item.items.length > 1 ? (
+              <View style={styles.orderItemsList}>
+                {item.items.map((li, i) => (
+                  <Text key={i} style={styles.orderItemLine} numberOfLines={1}>{li.quantity} × {li.food_item_name}</Text>
+                ))}
+              </View>
+            ) : null}
             <Text style={styles.orderDate}>{date}</Text>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: config.color + '18' }]}>
@@ -283,6 +295,8 @@ const styles = StyleSheet.create({
   typePillNeutral: { backgroundColor: COLORS.borderLight },
   typePillText: { fontSize: 10.5, fontFamily: 'DMSans_700Bold', textTransform: 'uppercase', letterSpacing: 0.4 },
   orderVendor: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
+  orderItemsList: { marginTop: 4, gap: 1 },
+  orderItemLine: { fontSize: 12.5, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
   orderDate: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, marginTop: 2 },
   statusBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,

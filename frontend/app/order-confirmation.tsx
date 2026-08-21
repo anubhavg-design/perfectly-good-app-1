@@ -10,12 +10,15 @@ const ORDER_TYPE_LABELS: Record<string, string> = { surplus: 'Surplus', takeaway
 export default function OrderConfirmationScreen() {
   const router = useRouter();
   const p = useLocalSearchParams<{
-    orderId: string; code: string; vendorName: string; itemName: string;
+    orderId: string; code: string; vendorName: string; itemName: string; items: string;
     pickupStart: string; pickupEnd: string; orderType: string;
   }>();
 
   const orderNumber = (p.orderId || '').replace(/^order_?/i, '').slice(0, 10).toUpperCase();
   const pickupWindow = p.pickupStart && p.pickupEnd ? `${p.pickupStart} – ${p.pickupEnd}` : 'As per restaurant';
+  const items: { name: string; quantity: number }[] = (() => {
+    try { return JSON.parse(p.items || '[]'); } catch { return []; }
+  })();
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -35,7 +38,16 @@ export default function OrderConfirmationScreen() {
 
         {/* Order summary */}
         <View style={styles.card}>
-          {p.itemName ? (
+          {items.length > 0 ? (
+            <View style={styles.itemsBlock}>
+              {items.map((it, i) => (
+                <View key={i} style={styles.itemLine}>
+                  <Text style={styles.itemLineName} numberOfLines={1}>{it.name}</Text>
+                  <Text style={styles.itemLineQty}>× {it.quantity}</Text>
+                </View>
+              ))}
+            </View>
+          ) : p.itemName ? (
             <Text style={styles.itemName}>{p.itemName}</Text>
           ) : null}
           <View style={styles.row}>
@@ -93,6 +105,10 @@ const styles = StyleSheet.create({
   codeHint: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: 'rgba(255,255,255,0.9)', textAlign: 'center' },
   card: { width: '100%', backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, ...SHADOWS.small },
   itemName: { fontSize: 17, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginBottom: SPACING.sm },
+  itemsBlock: { marginBottom: SPACING.sm, gap: 4 },
+  itemLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  itemLineName: { flex: 1, fontSize: 15, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
+  itemLineQty: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginLeft: SPACING.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, paddingVertical: SPACING.xs + 2 },
   rowLabel: { fontSize: 13.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary },
   rowValue: { flex: 1, textAlign: 'right', fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.textPrimary },

@@ -1141,8 +1141,9 @@ async def browse_deals(
 # ══════════════════════════════════════════════════════════════════════════
 
 class CreateOrderBody(BaseModel):
-    food_item_id: str
-    quantity: int
+    food_item_id: Optional[str] = None
+    quantity: Optional[int] = None
+    items: Optional[list] = None  # [{food_item_id, quantity}] — multi-item cart
     order_type: Optional[str] = "surplus"  # "surplus" | "takeaway" | "dine_in"
     shift_start: Optional[str] = None
     shift_end: Optional[str] = None
@@ -1151,8 +1152,8 @@ class VerifyOrderBody(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: str
     razorpay_signature: str
-    food_item_id: str
-    quantity: int
+    food_item_id: Optional[str] = None
+    quantity: Optional[int] = None
     order_type: Optional[str] = "surplus"
 
 @api.post("/orders/create")
@@ -1160,31 +1161,59 @@ async def create_order(body: CreateOrderBody, request: Request):
     user = await get_current_user(request)
     order_type = body.order_type if body.order_type in ("surplus", "takeaway", "dine_in") else "surplus"
 
-    if order_type == "surplus":
-        item = await db.menu_items.find_one({"menu_item_id": body.food_item_id, "available_today": True}, {"_id": 0})
-        if not item:
-            raise HTTPException(status_code=404, detail="Item not available")
-        if item.get("in_stock") is False:
-            raise HTTPException(status_code=400, detail="This item is sold out")
-        qty_avail = item.get("quantity_available")
-        if qty_avail is not None and body.quantity > qty_avail:
-            raise HTTPException(status_code=400, detail="Not enough quantity available")
-        unit_price = item.get("discounted_price") or 0
-    else:
-        # Takeaway / Dine-in: order from the regular menu at menu (original) price
-        # with the vendor's flat discount applied.
-        item = await db.menu_items.find_one({"menu_item_id": body.food_item_id}, {"_id": 0})
-        if not item:
-            raise HTTPException(status_code=404, detail="Item not found")
-        if item.get("in_stock") is False:
-            raise HTTPException(status_code=400, detail="This item is sold out")
-        vendor = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
-        disc = (vendor or {}).get("discount_percentage") or 0
-        base_price = item.get("original_price") or item.get("discounted_price") or 0
-        unit_price = round(base_price * (1 - disc / 100), 2)
+    # Build the list of {food_item_id, quantity} to order (multi-item cart or legacy single item)
+    raw_items = body.items if body.items else (
+        [{"food_item_id": body.food_item_id, "quantity": body.quantity or 1}] if body.food_item_id else []
+    )
+    raw_items = [ri for ri in raw_items if ri.get("food_item_id") and int(ri.get("quantity") or 0) > 0]
+    if not raw_items:
+        raise HTTPException(status_code=400, detail="Your cart is empty")
+
+    priced_items = []
+    vendor_id = None
+    vendor_cache: dict = {}
+    for ri in raw_items:
+        fid = ri["food_item_id"]
+        qty = int(ri["quantity"])
+        if order_type == "surplus":
+            item = await db.menu_items.find_one({"menu_item_id": fid, "available_today": True}, {"_id": 0})
+            if not item:
+                raise HTTPException(status_code=404, detail="One of the items is no longer available")
+            if item.get("in_stock") is False:
+                raise HTTPException(status_code=400, detail=f"{item.get('name', 'An item')} is sold out")
+            qty_avail = item.get("quantity_available")
+            if qty_avail is not None and qty > qty_avail:
+                raise HTTPException(status_code=400, detail=f"Only {qty_avail} left of {item.get('name', 'an item')}")
+            unit_price = item.get("discounted_price") or 0
+        else:
+            item = await db.menu_items.find_one({"menu_item_id": fid}, {"_id": 0})
+            if not item:
+                raise HTTPException(status_code=404, detail="One of the items is no longer available")
+            if item.get("in_stock") is False:
+                raise HTTPException(status_code=400, detail=f"{item.get('name', 'An item')} is sold out")
+            vid = item.get("vendor_id")
+            if vid not in vendor_cache:
+                vendor_cache[vid] = await db.vendors.find_one({"vendor_id": vid}, {"_id": 0})
+            disc = (vendor_cache.get(vid) or {}).get("discount_percentage") or 0
+            base_price = item.get("original_price") or item.get("discounted_price") or 0
+            unit_price = round(base_price * (1 - disc / 100), 2)
+
+        if vendor_id is None:
+            vendor_id = item.get("vendor_id")
+        elif vendor_id != item.get("vendor_id"):
+            raise HTTPException(status_code=400, detail="All items in an order must be from the same restaurant")
+
+        priced_items.append({
+            "food_item_id": fid,
+            "food_item_name": item.get("name", ""),
+            "quantity": qty,
+            "unit_price": round(unit_price, 2),
+            "image_url": item.get("thumbnail_url") or item.get("image_url", ""),
+            "line_subtotal": round(unit_price * qty, 2),
+        })
 
     # Vendor must be Active (admin-approved) to receive orders.
-    _ov = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
+    _ov = vendor_cache.get(vendor_id) or await db.vendors.find_one({"vendor_id": vendor_id}, {"_id": 0})
     if not _ov or _ov.get("status") != "active":
         raise HTTPException(status_code=400, detail="This restaurant is not currently accepting orders.")
 
@@ -1208,7 +1237,7 @@ async def create_order(body: CreateOrderBody, request: Request):
         chosen_shift = open_st.get("current_shift") or (today_shifts[0] if today_shifts else None)
 
     cfg = await get_settings_doc()
-    subtotal = round(unit_price * body.quantity, 2)
+    subtotal = round(sum(pi["line_subtotal"] for pi in priced_items), 2)
     gst = round(subtotal * cfg.get("gst_rate", 0.05), 2)
     convenience_fee = round(subtotal * cfg.get("convenience_rate", 0.05), 2)
     total = round(subtotal + gst + convenience_fee, 2)
@@ -1233,10 +1262,11 @@ async def create_order(body: CreateOrderBody, request: Request):
     await db.pending_orders.insert_one({
         "razorpay_order_id": razorpay_order_id,
         "user_id": user["user_id"],
-        "food_item_id": body.food_item_id,
-        "quantity": body.quantity,
+        "food_item_id": priced_items[0]["food_item_id"],
+        "items": priced_items,
+        "quantity": sum(pi["quantity"] for pi in priced_items),
         "order_type": order_type,
-        "unit_price": round(unit_price, 2),
+        "unit_price": priced_items[0]["unit_price"],
         "item_subtotal": round(subtotal, 2),
         "total_amount": total,
         "pickup_start_time": (chosen_shift or {}).get("start", ""),
@@ -1280,22 +1310,41 @@ async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optio
 
     order_id = gen_id("order")
     order_type = pending.get("order_type", "surplus")
-    quantity = pending.get("quantity", 1)
-    unit_price = pending.get("unit_price", item.get("discounted_price", 0))
     now = datetime.now(timezone.utc)
     pickup_code = await _gen_pickup_code()
+
+    # Normalize the ordered items (multi-item cart or legacy single item).
+    pending_items = pending.get("items")
+    if not pending_items:
+        unit_price_legacy = pending.get("unit_price", item.get("discounted_price", 0))
+        legacy_qty = pending.get("quantity", 1)
+        pending_items = [{
+            "food_item_id": pending.get("food_item_id"),
+            "food_item_name": item.get("name", ""),
+            "quantity": legacy_qty,
+            "unit_price": unit_price_legacy,
+            "image_url": item.get("thumbnail_url") or item.get("image_url", ""),
+            "line_subtotal": round(unit_price_legacy * legacy_qty, 2),
+        }]
+
+    total_qty = sum(i.get("quantity", 1) for i in pending_items)
+    first_name = pending_items[0].get("food_item_name", item.get("name", ""))
+    summary_name = first_name if len(pending_items) == 1 else f"{first_name} + {len(pending_items) - 1} more"
+    unit_price = pending_items[0].get("unit_price", item.get("discounted_price", 0))
+
     order_doc = {
         "order_id": order_id,
         "user_id": pending.get("user_id"),
         "user_name": order_user.get("name", ""),
         "food_item_id": pending.get("food_item_id"),
-        "food_item_name": item.get("name", ""),
+        "food_item_name": summary_name,
+        "items": pending_items,
         "vendor_id": item.get("vendor_id", ""),
         "vendor_name": vendor.get("name", "") if vendor else "",
-        "quantity": quantity,
+        "quantity": total_qty,
         "order_type": order_type,
         "discounted_price": unit_price,
-        "item_subtotal": pending.get("item_subtotal", round(unit_price * quantity, 2)),
+        "item_subtotal": pending.get("item_subtotal", round(sum(i.get("line_subtotal", 0) for i in pending_items), 2)),
         "total_amount": pending.get("total_amount", 0),
         "status": "reserved",
         "pickup_code": pickup_code,
@@ -1311,12 +1360,13 @@ async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optio
     }
     await db.orders.insert_one(order_doc)
 
-    # Decrement available quantity for surplus listings only (if tracked)
-    if order_type == "surplus" and item.get("quantity_available") is not None:
-        await db.menu_items.update_one(
-            {"menu_item_id": pending.get("food_item_id")},
-            {"$inc": {"quantity_available": -quantity}},
-        )
+    # Decrement available quantity for surplus listings only (per item, if tracked)
+    if order_type == "surplus":
+        for pi in pending_items:
+            await db.menu_items.update_one(
+                {"menu_item_id": pi.get("food_item_id"), "quantity_available": {"$ne": None}},
+                {"$inc": {"quantity_available": -pi.get("quantity", 1)}},
+            )
     await db.vendors.update_one({"vendor_id": item.get("vendor_id", "")}, {"$set": {"last_order_date": datetime.now(timezone.utc)}})
     await db.pending_orders.delete_one({"razorpay_order_id": rzp_order_id})
 
@@ -1324,7 +1374,7 @@ async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optio
     await send_push_to_vendor(
         vendor_id=item.get("vendor_id", ""),
         title="New Order!",
-        body=f"{order_user.get('name', 'A customer')} reserved {quantity}× {item.get('name', 'item')} — ₹{pending.get('total_amount', 0)}",
+        body=f"{order_user.get('name', 'A customer')} reserved {total_qty}× {summary_name} — ₹{pending.get('total_amount', 0)}",
         data={"action_url": "/dashboard", "idempotency_key": f"new_order:{order_id}"},
     )
 
@@ -1536,6 +1586,7 @@ async def reorder(order_id: str, request: Request):
         "name": item.get("name", ""),
         "price": price,
         "originalPrice": item.get("original_price") or price,
+        "vendorId": vendor.get("vendor_id", ""),
         "vendorName": vendor.get("name", ""),
         "maxQty": max_qty,
         "imageUrl": item.get("image_url", ""),
@@ -1555,12 +1606,14 @@ async def cancel_user_order(order_id: str, request: Request):
     if order["status"] != "reserved":
         raise HTTPException(status_code=400, detail="Only reserved orders can be cancelled")
     await db.orders.update_one({"order_id": order_id}, {"$set": {"status": "cancelled"}})
-    # Restore item quantity (if tracked)
-    if order.get("quantity"):
-        await db.menu_items.update_one(
-            {"menu_item_id": order.get("food_item_id"), "quantity_available": {"$ne": None}},
-            {"$inc": {"quantity_available": order.get("quantity", 0)}},
-        )
+    # Restore item quantities (per item; if tracked)
+    line_items = order.get("items") or ([{"food_item_id": order.get("food_item_id"), "quantity": order.get("quantity", 0)}] if order.get("food_item_id") else [])
+    for li in line_items:
+        if li.get("quantity"):
+            await db.menu_items.update_one(
+                {"menu_item_id": li.get("food_item_id"), "quantity_available": {"$ne": None}},
+                {"$inc": {"quantity_available": li.get("quantity", 0)}},
+            )
     return {"message": "Order cancelled"}
 
 # ══════════════════════════════════════════════════════════════════════════

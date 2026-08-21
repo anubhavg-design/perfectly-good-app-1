@@ -228,10 +228,10 @@ export const restaurantsApi = {
 
 // Orders endpoints
 export const ordersApi = {
-  create: (data: { food_item_id: string; quantity: number; order_type?: string; shift_start?: string; shift_end?: string }) =>
+  create: (data: { food_item_id?: string; quantity?: number; items?: { food_item_id: string; quantity: number }[]; order_type?: string; shift_start?: string; shift_end?: string }) =>
     apiFetch('/orders/create', { method: 'POST', body: JSON.stringify(data) }),
 
-  verify: (data: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string; food_item_id: string; quantity: number; order_type?: string }) =>
+  verify: (data: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string; food_item_id?: string; quantity?: number; order_type?: string }) =>
     apiFetch('/orders/verify', { method: 'POST', body: JSON.stringify(data) }),
 
   userOrders: () => apiFetch('/orders/user'),

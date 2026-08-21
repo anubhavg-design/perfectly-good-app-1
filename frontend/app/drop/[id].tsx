@@ -8,6 +8,9 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Clock, MapPin, Users, Tag, ExternalLink } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi } from '../../src/api/client';
+import AddToCartSheet from '../../src/components/AddToCartSheet';
+import CartBar from '../../src/components/CartBar';
+import { AddMeta } from '../../src/context/CartContext';
 
 function getDiscount(original: number, discounted: number) {
   return Math.round(((original - discounted) / original) * 100);
@@ -31,6 +34,7 @@ export default function DropDetailScreen() {
   const router = useRouter();
   const [drop, setDrop] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [sheet, setSheet] = useState<AddMeta | null>(null);
 
   useEffect(() => {
     loadDrop();
@@ -190,13 +194,35 @@ export default function DropDetailScreen() {
           <TouchableOpacity
             testID="reserve-btn"
             style={styles.reserveBtn}
-            onPress={() => router.push({ pathname: '/checkout', params: { itemId: drop.item_id, name: drop.name, price: String(drop.price ?? drop.discounted_price ?? drop.original_price), originalPrice: String(drop.original_price), vendorName: drop.vendor_name, maxQty: String(drop.quantity_available ?? 0), imageUrl: drop.image_url, orderType: 'surplus', isOpen: drop.is_open ? '1' : '0', openStatusText: drop.open_status_text || '', todayShifts: JSON.stringify(drop.today_shifts || []) } })}
+            onPress={() => setSheet({
+              vendorId: drop.vendor_id,
+              vendorName: drop.vendor_name,
+              orderType: 'surplus',
+              isOpen: !!drop.is_open,
+              openStatusText: drop.open_status_text || '',
+              todayShifts: drop.today_shifts || [],
+              item: {
+                itemId: drop.item_id,
+                name: drop.name,
+                price: Number(drop.price ?? drop.discounted_price ?? drop.original_price) || 0,
+                originalPrice: Number(drop.original_price) || 0,
+                imageUrl: drop.image_url || '',
+                maxQty: drop.quantity_available ?? 0,
+              },
+            })}
             activeOpacity={0.8}
           >
-            <Text style={styles.reserveBtnText}>Reserve Now</Text>
+            <Text style={styles.reserveBtnText}>Add to Cart</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+      <CartBar vendorId={drop.vendor_id} />
+      <AddToCartSheet
+        visible={!!sheet}
+        onClose={() => setSheet(null)}
+        meta={sheet}
+        foodType={drop.food_type}
+      />
     </View>
   );
 }

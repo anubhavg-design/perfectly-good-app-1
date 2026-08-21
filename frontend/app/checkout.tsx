@@ -6,88 +6,62 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
-import { ArrowLeft, Minus, Plus, ShieldCheck } from 'lucide-react-native';
+import { ArrowLeft, ShieldCheck } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { ordersApi } from '../src/api/client';
 import { useAuth } from '../src/context/AuthContext';
+import { useCart, orderTypeLabel } from '../src/context/CartContext';
+import CachedImage from '../src/components/CachedImage';
 
 const RAZORPAY_KEY = process.env.EXPO_PUBLIC_RAZORPAY_KEY || 'rzp_test_SSfFeyx6ytVg0B';
 
 export default function CheckoutScreen() {
-  const params = useLocalSearchParams<{
-    itemId: string;
-    name: string;
-    price: string;
-    originalPrice: string;
-    vendorName: string;
-    maxQty: string;
-    imageUrl: string;
-    orderType: string;
-    resume: string;
-    isOpen: string;
-    openStatusText: string;
-    todayShifts: string;
-  }>();
+  const params = useLocalSearchParams<{ resume: string }>();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const [quantity, setQuantity] = useState(1);
+  const { cart, subtotal, itemCount, clearCart } = useCart();
   const [loading, setLoading] = useState(false);
   const [showRazorpay, setShowRazorpay] = useState(false);
   const [razorpayData, setRazorpayData] = useState<any>(null);
 
-  // Parse today's shifts and keep only those that haven't ended yet (device local time ≈ IST).
   const fmt12 = (t: string) => {
     if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return t || '';
     const [h, m] = t.split(':').map(Number);
     const ap = h < 12 ? 'AM' : 'PM';
     return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ap}`;
   };
-  const allShifts: { start: string; end: string }[] = React.useMemo(() => {
-    try { return JSON.parse(params.todayShifts || '[]'); } catch { return []; }
-  }, [params.todayShifts]);
+  const allShifts = cart?.todayShifts || [];
   const nowMin = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
   const t2m = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
   const selectableShifts = allShifts.filter((s) => t2m(s.end) > nowMin);
-  const isClosed = params.isOpen === '0' || selectableShifts.length === 0;
+  const isClosed = !cart?.isOpen || selectableShifts.length === 0;
   const [shiftIdx, setShiftIdx] = useState(0);
   const chosenShift = selectableShifts[shiftIdx] || selectableShifts[0] || null;
 
-  // Reserving an item requires an account. Guests are sent to the login screen
-  // and returned to this exact checkout afterwards to continue their reservation.
+  // Reserving requires an account. Guests go to login and return here (cart persists).
   React.useEffect(() => {
     if (authLoading || user) return;
-    const qs = Object.entries(params)
-      .filter(([, v]) => v != null && v !== '')
-      .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
-      .join('&');
-    const nextUrl = `/checkout${qs ? `?${qs}&resume=1` : '?resume=1'}`;
-    router.replace(`/login?next=${encodeURIComponent(nextUrl)}`);
+    router.replace(`/login?next=${encodeURIComponent('/checkout?resume=1')}`);
   }, [user, authLoading]);
 
-  const orderType = (params.orderType as string) || 'surplus';
-  const ORDER_LABELS: Record<string, string> = { surplus: 'Surplus', takeaway: 'Takeaway', dine_in: 'Dine-in' };
-  const orderLabel = ORDER_LABELS[orderType] || 'Surplus';
+  const orderType = cart?.orderType || 'surplus';
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const money = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
-  const price = Number(params.price) || 0;
-  const originalPrice = Number(params.originalPrice) || 0;
-  const maxQty = Number(params.maxQty) > 0 ? Number(params.maxQty) : 99;
-  const subtotal = round2(price * quantity);
   const gst = round2(subtotal * 0.05);
   const convenienceFee = round2(subtotal * 0.05);
   const total = round2(subtotal + gst + convenienceFee);
-  const totalSavings = (originalPrice - price) * quantity;
+  const totalSavings = cart ? cart.items.reduce((s, i) => s + Math.max(0, (i.originalPrice - i.price)) * i.quantity, 0) : 0;
 
   const handleReserve = async () => {
+    if (!cart || cart.items.length === 0) return;
     if (isClosed) {
-      Alert.alert('Restaurant closed', params.openStatusText || 'This restaurant is closed right now.');
+      Alert.alert('Restaurant closed', cart.openStatusText || 'This restaurant is closed right now.');
       return;
     }
     setLoading(true);
     try {
       const orderData = await ordersApi.create({
-        food_item_id: params.itemId!,
-        quantity,
+        items: cart.items.map((i) => ({ food_item_id: i.itemId, quantity: i.quantity })),
         order_type: orderType,
         shift_start: chosenShift?.start,
         shift_end: chosenShift?.end,
@@ -101,19 +75,19 @@ export default function CheckoutScreen() {
     }
   };
 
-  // Guest cart memory: if the user just signed in to complete a reservation,
-  // jump straight to payment instead of making them tap "Reserve" again.
+  // Guest resume: after login, jump straight to payment.
   const resumedRef = React.useRef(false);
   React.useEffect(() => {
-    if (user && params.resume === '1' && params.itemId && !resumedRef.current) {
+    if (user && params.resume === '1' && cart && cart.items.length > 0 && !resumedRef.current) {
       resumedRef.current = true;
       handleReserve();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, params.resume]);
+  }, [user, params.resume, cart]);
 
   const getRazorpayHTML = () => {
     if (!razorpayData) return '';
+    const desc = `${itemCount} item(s) from ${cart?.vendorName || 'restaurant'}`.replace(/'/g, "\\'");
     return `
     <!DOCTYPE html>
     <html>
@@ -134,7 +108,7 @@ export default function CheckoutScreen() {
           currency: 'INR',
           order_id: '${razorpayData.razorpay_order_id}',
           name: 'Perfectly Good',
-          description: '${params.name?.replace(/'/g, "\\'")}',
+          description: '${desc}',
           handler: function(response) {
             window.ReactNativeWebView.postMessage(JSON.stringify({
               type: 'success',
@@ -152,10 +126,7 @@ export default function CheckoutScreen() {
         };
         var rzp = new Razorpay(options);
         rzp.on('payment.failed', function(response) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'error',
-            message: response.error.description
-          }));
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: response.error.description }));
         });
         setTimeout(function() { rzp.open(); }, 500);
       </script>
@@ -174,18 +145,22 @@ export default function CheckoutScreen() {
             razorpay_order_id: data.razorpay_order_id,
             razorpay_payment_id: data.razorpay_payment_id,
             razorpay_signature: data.razorpay_signature,
-            food_item_id: params.itemId!,
-            quantity,
             order_type: orderType,
           });
           const o = res?.order || {};
+          const items = (o.items || cart?.items || []).map((i: any) => ({
+            name: i.food_item_name || i.name,
+            quantity: i.quantity,
+          }));
+          clearCart();
           router.replace({
             pathname: '/order-confirmation',
             params: {
               orderId: o.order_id || res?.order_id || '',
               code: o.pickup_code || '',
-              vendorName: o.vendor_name || params.vendorName || '',
-              itemName: o.food_item_name || params.name || '',
+              vendorName: o.vendor_name || cart?.vendorName || '',
+              itemName: o.food_item_name || '',
+              items: JSON.stringify(items),
               pickupStart: o.pickup_start_time || '',
               pickupEnd: o.pickup_end_time || '',
               orderType: o.order_type || orderType,
@@ -209,11 +184,7 @@ export default function CheckoutScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.webviewHeader}>
-          <TouchableOpacity
-            testID="close-razorpay"
-            onPress={() => setShowRazorpay(false)}
-            style={styles.webviewClose}
-          >
+          <TouchableOpacity testID="close-razorpay" onPress={() => setShowRazorpay(false)} style={styles.webviewClose}>
             <ArrowLeft size={22} color={COLORS.textPrimary} />
             <Text style={styles.webviewCloseText}>Cancel Payment</Text>
           </TouchableOpacity>
@@ -225,9 +196,7 @@ export default function CheckoutScreen() {
           domStorageEnabled
           startInLoadingState
           renderLoading={() => (
-            <View style={styles.webviewLoader}>
-              <ActivityIndicator size="large" color={COLORS.primary} />
-            </View>
+            <View style={styles.webviewLoader}><ActivityIndicator size="large" color={COLORS.primary} /></View>
           )}
           style={styles.webview}
         />
@@ -235,13 +204,32 @@ export default function CheckoutScreen() {
     );
   }
 
+  if (!user || !cart || cart.items.length === 0) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity testID="checkout-back-btn" onPress={() => router.back()} style={styles.headerBack}>
+            <ArrowLeft size={22} color={COLORS.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Checkout</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        {!user ? (
+          <View style={styles.loader}><ActivityIndicator size="large" color={COLORS.primary} /></View>
+        ) : (
+          <View style={styles.loader}>
+            <Text style={styles.emptyText}>Your cart is empty.</Text>
+            <TouchableOpacity style={styles.browseBtn} onPress={() => router.replace('/(tabs)/home')}>
+              <Text style={styles.browseBtnText}>Browse restaurants</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      {!user ? (
-        <View style={styles.loader}><ActivityIndicator size="large" color={COLORS.primary} /></View>
-      ) : (
-      <>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity testID="checkout-back-btn" onPress={() => router.back()} style={styles.headerBack}>
           <ArrowLeft size={22} color={COLORS.textPrimary} />
@@ -251,45 +239,36 @@ export default function CheckoutScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Item Summary */}
+        {/* Vendor + order type */}
         <View style={styles.itemCard}>
           <View style={styles.orderTypeBadge}>
-            <Text style={styles.orderTypeBadgeText}>{orderLabel}</Text>
+            <Text style={styles.orderTypeBadgeText}>{orderTypeLabel(orderType)}</Text>
           </View>
-          <Text style={styles.itemName}>{params.name}</Text>
-          <Text style={styles.itemVendor}>{params.vendorName}</Text>
+          <Text style={styles.itemVendor}>{cart.vendorName}</Text>
         </View>
 
-        {/* Quantity */}
+        {/* Items */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quantity</Text>
-          <View style={styles.quantityCard}>
-            <TouchableOpacity
-              testID="qty-decrease"
-              style={[styles.qtyBtn, quantity <= 1 && styles.qtyBtnDisabled]}
-              onPress={() => setQuantity(Math.max(1, quantity - 1))}
-              disabled={quantity <= 1}
-            >
-              <Minus size={20} color={quantity <= 1 ? COLORS.textMuted : COLORS.primary} />
-            </TouchableOpacity>
-            <Text style={styles.qtyValue}>{quantity}</Text>
-            <TouchableOpacity
-              testID="qty-increase"
-              style={[styles.qtyBtn, quantity >= maxQty && styles.qtyBtnDisabled]}
-              onPress={() => setQuantity(Math.min(maxQty, quantity + 1))}
-              disabled={quantity >= maxQty}
-            >
-              <Plus size={20} color={quantity >= maxQty ? COLORS.textMuted : COLORS.primary} />
-            </TouchableOpacity>
+          <Text style={styles.sectionTitle}>Your Items ({itemCount})</Text>
+          <View style={styles.priceCard}>
+            {cart.items.map((it, idx) => (
+              <View key={it.itemId} style={[styles.lineRow, idx > 0 && styles.lineRowBorder]}>
+                <CachedImage uri={it.imageUrl} style={styles.lineImg} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.lineName} numberOfLines={1}>{it.name}</Text>
+                  <Text style={styles.lineMeta}>{it.quantity} × ₹{it.price}</Text>
+                </View>
+                <Text style={styles.lineTotal}>₹{money(round2(it.price * it.quantity))}</Text>
+              </View>
+            ))}
           </View>
-          <Text style={styles.maxQtyHint}>{orderType === 'surplus' ? `Max available: ${maxQty}` : ' '}</Text>
         </View>
 
         {/* Closed banner */}
         {isClosed ? (
           <View style={styles.closedBanner}>
             <Text style={styles.closedBannerTitle}>Restaurant is closed</Text>
-            <Text style={styles.closedBannerText}>{params.openStatusText || 'Ordering is unavailable right now.'}</Text>
+            <Text style={styles.closedBannerText}>{cart.openStatusText || 'Ordering is unavailable right now.'}</Text>
           </View>
         ) : null}
 
@@ -301,15 +280,8 @@ export default function CheckoutScreen() {
               {selectableShifts.map((s, i) => {
                 const active = i === shiftIdx;
                 return (
-                  <TouchableOpacity
-                    key={`${s.start}-${s.end}`}
-                    testID={`shift-${i}`}
-                    style={[styles.slotChip, active && styles.slotChipActive]}
-                    onPress={() => setShiftIdx(i)}
-                  >
-                    <Text style={[styles.slotChipText, active && styles.slotChipTextActive]}>
-                      {fmt12(s.start)} – {fmt12(s.end)}
-                    </Text>
+                  <TouchableOpacity key={`${s.start}-${s.end}`} testID={`shift-${i}`} style={[styles.slotChip, active && styles.slotChipActive]} onPress={() => setShiftIdx(i)}>
+                    <Text style={[styles.slotChipText, active && styles.slotChipTextActive]}>{fmt12(s.start)} – {fmt12(s.end)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -323,7 +295,7 @@ export default function CheckoutScreen() {
           <Text style={styles.sectionTitle}>Price Breakdown</Text>
           <View style={styles.priceCard}>
             <View style={styles.priceRow}>
-              <Text style={styles.priceLabel}>Subtotal ({quantity} × ₹{price})</Text>
+              <Text style={styles.priceLabel}>Subtotal</Text>
               <Text style={styles.priceValue}>₹{money(subtotal)}</Text>
             </View>
             <View style={styles.priceRow}>
@@ -340,45 +312,34 @@ export default function CheckoutScreen() {
               <Text style={styles.totalValue}>₹{money(total)}</Text>
             </View>
             {totalSavings > 0 ? (
-              <View style={[styles.savingsRow]}>
-                <Text style={styles.savingsText}>You save ₹{totalSavings} on this order!</Text>
+              <View style={styles.savingsRow}>
+                <Text style={styles.savingsText}>You save ₹{money(round2(totalSavings))} on this order!</Text>
               </View>
             ) : null}
           </View>
         </View>
 
-        {/* Security Note */}
         <View style={styles.securityNote}>
           <ShieldCheck size={16} color={COLORS.primary} />
           <Text style={styles.securityText}>Payments secured by Razorpay. 100% safe.</Text>
         </View>
       </ScrollView>
 
-      {/* Bottom CTA */}
       <View style={styles.bottomBar}>
-        <TouchableOpacity
-          testID="pay-now-btn"
-          style={[styles.payBtn, (loading || isClosed) && styles.payBtnDisabled]}
-          onPress={handleReserve}
-          disabled={loading || isClosed}
-          activeOpacity={0.8}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.payBtnText}>{isClosed ? 'Closed' : `Pay ₹${money(total)}`}</Text>
-          )}
+        <TouchableOpacity testID="pay-now-btn" style={[styles.payBtn, (loading || isClosed) && styles.payBtnDisabled]} onPress={handleReserve} disabled={loading || isClosed} activeOpacity={0.8}>
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.payBtnText}>{isClosed ? 'Closed' : `Pay ₹${money(total)}`}</Text>}
         </TouchableOpacity>
       </View>
-      </>
-      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loader: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: SPACING.md },
+  emptyText: { fontSize: 15, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  browseBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingHorizontal: SPACING.lg, paddingVertical: 12 },
+  browseBtnText: { color: '#fff', fontSize: 15, fontFamily: 'Outfit_600SemiBold' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   headerBack: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
@@ -386,18 +347,16 @@ const styles = StyleSheet.create({
   itemCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.md, ...SHADOWS.small },
   orderTypeBadge: { alignSelf: 'flex-start', backgroundColor: COLORS.primary + '18', borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm + 2, paddingVertical: 3, marginBottom: SPACING.xs },
   orderTypeBadgeText: { fontSize: 11, fontFamily: 'DMSans_700Bold', color: COLORS.primary, textTransform: 'uppercase', letterSpacing: 0.6 },
-  itemName: { fontSize: 18, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
-  itemVendor: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 4 },
+  itemVendor: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
   section: { marginBottom: SPACING.lg },
   sectionTitle: { fontSize: 15, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginBottom: SPACING.sm, textTransform: 'uppercase', letterSpacing: 0.5 },
-  quantityCard: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.lg,
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, ...SHADOWS.small,
-  },
-  qtyBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary + '15', justifyContent: 'center', alignItems: 'center' },
-  qtyBtnDisabled: { backgroundColor: COLORS.borderLight },
-  qtyValue: { fontSize: 24, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary, minWidth: 40, textAlign: 'center' },
-  maxQtyHint: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textAlign: 'center', marginTop: SPACING.xs },
+  lineRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, paddingVertical: SPACING.sm },
+  lineRowBorder: { borderTopWidth: 1, borderTopColor: COLORS.borderLight },
+  lineImg: { width: 48, height: 48, borderRadius: RADIUS.sm, backgroundColor: COLORS.skeleton },
+  lineName: { fontSize: 15, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
+  lineMeta: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
+  lineTotal: { fontSize: 15, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  maxQtyHint: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, marginTop: SPACING.xs },
   slotRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
   slotChip: { paddingHorizontal: SPACING.md, paddingVertical: 10, borderRadius: RADIUS.md, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOWS.small },
   slotChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },

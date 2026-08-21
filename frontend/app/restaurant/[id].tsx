@@ -9,6 +9,9 @@ import { ArrowLeft, MapPin, Clock, Tag, Leaf, ExternalLink, Sparkles, BadgeCheck
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { restaurantsApi } from '../../src/api/client';
 import CachedImage from '../../src/components/CachedImage';
+import AddToCartSheet from '../../src/components/AddToCartSheet';
+import CartBar from '../../src/components/CartBar';
+import { AddMeta } from '../../src/context/CartContext';
 
 type Tab = 'surplus' | 'takeaway' | 'dine_in';
 
@@ -40,6 +43,7 @@ export default function RestaurantScreen() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('surplus');
   const [sortBy, setSortBy] = useState('');
+  const [sheet, setSheet] = useState<{ meta: AddMeta; foodType: string } | null>(null);
   // Sub-type used when surplus is empty and we fall back to the regular menu
   const [fallbackType, setFallbackType] = useState<Exclude<Tab, 'surplus'>>('takeaway');
 
@@ -96,21 +100,24 @@ export default function RestaurantScreen() {
   const goToCheckout = (item: any, orderType: Tab) => {
     const isSurplus = orderType === 'surplus';
     const payPrice = item.price != null ? item.price : (isSurplus ? item.discounted_price : item.original_price);
-    router.push({
-      pathname: '/checkout',
-      params: {
-        itemId: item.menu_item_id || item.item_id,
-        name: item.name,
-        price: String(payPrice),
-        originalPrice: String(item.original_price),
+    setSheet({
+      meta: {
+        vendorId: vendor.vendor_id,
         vendorName: vendor.name,
-        maxQty: String(isSurplus ? (item.quantity_available ?? 0) : 0),
-        imageUrl: item.image_url || '',
         orderType,
-        isOpen: vendor.is_open ? '1' : '0',
+        isOpen: !!vendor.is_open,
         openStatusText: vendor.open_status_text || '',
-        todayShifts: JSON.stringify(vendor.today_shifts || []),
+        todayShifts: vendor.today_shifts || [],
+        item: {
+          itemId: item.menu_item_id || item.item_id,
+          name: item.name,
+          price: Number(payPrice) || 0,
+          originalPrice: Number(item.original_price) || 0,
+          imageUrl: item.image_url || '',
+          maxQty: isSurplus ? (item.quantity_available ?? 0) : 0,
+        },
       },
+      foodType: item.food_type || 'veg',
     });
   };
 
@@ -266,6 +273,13 @@ export default function RestaurantScreen() {
           )}
         </View>
       </ScrollView>
+      <CartBar vendorId={vendor.vendor_id} />
+      <AddToCartSheet
+        visible={!!sheet}
+        onClose={() => setSheet(null)}
+        meta={sheet?.meta || null}
+        foodType={sheet?.foodType}
+      />
     </View>
   );
 }
