@@ -10,6 +10,7 @@ import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { restaurantsApi } from '../src/api/client';
 import CachedImage from '../src/components/CachedImage';
+import { ListSkeleton } from '../src/components/Skeleton';
 
 const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
@@ -104,7 +105,7 @@ export default function BrowseDealsScreen() {
       activeOpacity={0.85}
     >
       {item.item_image ? (
-        <CachedImage uri={item.item_image} style={styles.cardImage} />
+        <CachedImage uri={item.item_thumbnail || item.item_image} style={styles.cardImage} />
       ) : (
         <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
           <Tag size={22} color={COLORS.textMuted} />
@@ -198,8 +199,8 @@ export default function BrowseDealsScreen() {
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centerLoader}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
+        <View style={styles.skeletonWrap}>
+          <ListSkeleton count={6} variant="restaurant" />
         </View>
       ) : (
         <FlatList
@@ -266,6 +267,7 @@ const styles = StyleSheet.create({
   priceChipTextActive: { color: COLORS.primary, fontFamily: 'DMSans_700Bold' },
 
   centerLoader: { paddingVertical: 60, alignItems: 'center' },
+  skeletonWrap: { paddingTop: SPACING.md },
   listFooter: { paddingVertical: SPACING.lg, alignItems: 'center' },
   listContent: { padding: SPACING.md, gap: SPACING.md, paddingBottom: SPACING.xxl },
 

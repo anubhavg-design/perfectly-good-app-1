@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, RefreshControl, ScrollView,
+  RefreshControl, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -10,6 +10,7 @@ import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { dropsApi } from '../src/api/client';
 import CachedImage from '../src/components/CachedImage';
+import { ListSkeleton } from '../src/components/Skeleton';
 
 const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
@@ -79,7 +80,7 @@ export default function SurplusScreen() {
         activeOpacity={0.85}
       >
         {item.image_url ? (
-          <CachedImage uri={item.image_url} style={styles.cardImage} />
+          <CachedImage uri={item.thumbnail_url || item.image_url} style={styles.cardImage} />
         ) : (
           <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
             <Sparkles size={22} color={COLORS.textMuted} />
@@ -156,7 +157,7 @@ export default function SurplusScreen() {
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centerLoader}><ActivityIndicator size="large" color={COLORS.primary} /></View>
+        <View style={{ paddingTop: SPACING.md }}><ListSkeleton count={6} variant="restaurant" /></View>
       ) : (
         <FlatList
           testID="surplus-screen-list"

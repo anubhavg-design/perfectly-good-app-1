@@ -849,6 +849,7 @@ def _menu_public(m: dict, order_type: str, discount_pct: float = 0) -> dict:
         "name": m.get("name", ""),
         "description": m.get("description", ""),
         "image_url": m.get("image_url", ""),
+        "thumbnail_url": m.get("thumbnail_url") or m.get("image_url", ""),
         "food_type": m.get("food_type", "veg"),
         "contains_egg": bool(m.get("contains_egg")),
         "serving_size": m.get("serving_size", ""),
@@ -1045,6 +1046,7 @@ async def featured_deals(lat: Optional[float] = None, lon: Optional[float] = Non
             "item_id": chosen.get("menu_item_id"),
             "item_name": chosen.get("name", ""),
             "item_image": chosen.get("image_url", ""),
+            "item_thumbnail": chosen.get("thumbnail_url") or chosen.get("image_url", ""),
             "food_type": chosen.get("food_type", "veg"),
             "original_price": op,
             "price": price,
@@ -1102,6 +1104,7 @@ async def browse_deals(
             "item_id": m.get("menu_item_id"),
             "item_name": m.get("name", ""),
             "item_image": m.get("image_url", ""),
+            "item_thumbnail": m.get("thumbnail_url") or m.get("image_url", ""),
             "description": m.get("description", ""),
             "food_type": m.get("food_type", "veg"),
             "contains_egg": bool(m.get("contains_egg")),
@@ -3348,6 +3351,35 @@ async def ops_vendor_menu(vendor_id: str, request: Request):
     return items
 
 
+def _shrink_data_uri(uri: str, max_px: int, quality: int) -> str:
+    """Resize+recompress a base64 data-URI image. Returns original on failure or
+    if not a data URI (e.g., an external http URL is left untouched)."""
+    if not uri or not isinstance(uri, str) or not uri.startswith("data:image"):
+        return uri or ""
+    try:
+        import io, base64 as _b64
+        from PIL import Image as _PILImage
+        header, b64 = uri.split(",", 1)
+        raw = _b64.b64decode(b64)
+        img = _PILImage.open(io.BytesIO(raw)).convert("RGB")
+        img.thumbnail((max_px, max_px))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality, optimize=True)
+        return f"data:image/jpeg;base64,{_b64.b64encode(buf.getvalue()).decode('utf-8')}"
+    except Exception as e:
+        logger.warning(f"Image optimize failed (using original): {e}")
+        return uri
+
+
+def _optimize_menu_images(image_url: str):
+    """Return (optimized_full, thumbnail) for a menu image. Full ~1000px q78,
+    thumbnail ~320px q60 for list views."""
+    full = _shrink_data_uri(image_url, 1000, 78)
+    thumb = _shrink_data_uri(image_url, 320, 60)
+    return full, thumb
+
+
+
 @api.post("/ops/vendors/{vendor_id}/menu")
 async def ops_add_menu_item(vendor_id: str, body: OpsMenuItemBody, request: Request):
     await require_permission(request, "manage_menu")
@@ -3359,6 +3391,8 @@ async def ops_add_menu_item(vendor_id: str, body: OpsMenuItemBody, request: Requ
     if dp is None:
         dp = round(body.original_price * (1 - cfg["default_discount_pct"] / 100), 2)
     now = datetime.now(timezone.utc)
+    _img = body.image_url or "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600"
+    _full, _thumb = _optimize_menu_images(_img)
     doc = {
         "menu_item_id": gen_id("menu"), "vendor_id": vendor_id, "name": body.name,
         "description": body.description or "", "original_price": body.original_price,
@@ -3366,7 +3400,8 @@ async def ops_add_menu_item(vendor_id: str, body: OpsMenuItemBody, request: Requ
         "serving_size": body.serving_size or "", "food_type": body.food_type or "veg",
         "contains_egg": bool(body.contains_egg), "available_today": bool(body.available_today),
         "in_stock": True, "quantity_available": body.quantity_available,
-        "image_url": body.image_url or "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600",
+        "image_url": _full,
+        "thumbnail_url": _thumb,
         "created_at": now, "updated_at": now,
     }
     await db.menu_items.insert_one(doc)
@@ -3390,7 +3425,9 @@ async def ops_update_menu_item(menu_item_id: str, body: OpsMenuItemBody, request
     if body.quantity_available is not None:
         updates["quantity_available"] = body.quantity_available
     if body.image_url:
-        updates["image_url"] = body.image_url
+        _full, _thumb = _optimize_menu_images(body.image_url)
+        updates["image_url"] = _full
+        updates["thumbnail_url"] = _thumb
     result = await db.menu_items.update_one({"menu_item_id": menu_item_id}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Menu item not found")

@@ -1,0 +1,49 @@
+{
+  "summary": "Thumbnails + Skeletons + Cache-freshness feature review. Backend: 6/6 pytest tests PASS (test_thumbnails.py). Verified POST /api/ops/vendors/{id}/menu with a 1500×1500 base64 PNG stores an OPTIMIZED image_url (≤1000px JPEG q78) AND a smaller thumbnail_url (≤320px JPEG q60); thumbnail bytes are strictly smaller than the full image bytes. PUT /api/ops/menu/{id} with a new image regenerates both. Thumbnails ARE surfaced correctly on all list endpoints: /api/drops has thumbnail_url (item_to_drop spreads the raw menu_item, so thumbnail_url comes through), /api/featured-deals has item_thumbnail, /api/browse-deals has item_thumbnail, and /api/restaurants/{id} surplus_items have thumbnail_url (via _menu_public). Frontend: (1) Browse Deals screen — shimmer skeletons render during first load then are replaced by real cards (~24 skeleton bones, 6 restaurant-shape rows). Confirmed by delaying /api/browse-deals 4s. (2) Surplus screen (/surplus) — same shimmer skeletons render during first load then real cards render. (3) Home — the DROPS/Surplus row shimmer skeleton renders correctly during load (via dropsLoading), BUT the RESTAURANT section shows a centered ActivityIndicator instead of the restaurant-shaped ListSkeleton, because the top-level `if (loading && !refreshing) return <ActivityIndicator/>` at home.tsx:519-528 short-circuits before the FlatList renders, so its ListEmptyComponent skeleton (home.tsx:544-545) is never reached. This partially violates the 'not a blank screen or single spinner' requirement for restaurant cards. (4) Cache freshness — Home silently refreshes on refocus: after navigating from Home → Profile → Home, no full-screen spinner appears, Surplus + Nearby sections stay visible immediately, and /api/restaurants, /api/drops, /api/featured-deals are all re-fetched in the background. useFocusEffect + firstFocus ref correctly skips the first mount. (5) Images via expo-image (CachedImage) render without crashes on Home, Surplus, restaurant detail. (6) Regressions: veg-only-toggle works, tapping restaurant card navigates to /restaurant/{id}, Open/Closed status shows ('Open now'), Surplus/Takeaway/Dine-in chips render. Infinite-scroll cannot be exercised because DB has only 2 active vendors and 1 browse-deal item after the fresh cleanup (same limitation as iter24).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Home restaurant list",
+        "issue": "During initial Home load, the RESTAURANT section shows a centered ActivityIndicator instead of the restaurant-shaped shimmer skeleton. Cause: `if (loading && !refreshing) return <SafeAreaView>{ListHeader}<ActivityIndicator/></SafeAreaView>` (home.tsx:519-528) short-circuits before the FlatList renders, so its ListEmptyComponent `<ListSkeleton count={5} variant='restaurant' />` (home.tsx:544-545) is never reached. Fix: replace the ActivityIndicator with `<ListSkeleton count={5} variant='restaurant' />` or remove the early-return so the FlatList always renders and its empty-state skeleton shows.",
+        "testID": "restaurants-list",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_thumbnails.py",
+    "/app/test_reports/pytest/iter25_thumbnails.xml"
+  ],
+  "action_items": [
+    "Home: replace the centered ActivityIndicator at home.tsx:519-528 with the restaurant ListSkeleton (or remove the early-return) so restaurant cards get shimmer placeholders on first load — matches the requirement 'not a blank screen or single spinner' and mirrors the pattern already used on Browse Deals and Surplus."
+  ],
+  "critical_code_review_comments": [
+    "Backend _shrink_data_uri (server.py:3354-3371) safely no-ops on non data-URI input (e.g., external http URLs are passed through), so existing menu items that use external URLs are not accidentally rewritten. _optimize_menu_images (server.py:3374-3379) generates full (1000px q78) + thumb (320px q60). Correct.",
+    "Backend ops_add_menu_item (server.py:3383-3411) writes both image_url AND thumbnail_url. ops_update_menu_item (server.py:3414-3434) regenerates BOTH when image_url is provided. Correct.",
+    "Backend _menu_public (server.py:837-870) exposes thumbnail_url with a graceful fallback to image_url. item_to_drop (server.py:609-637) uses `dict(item)` so thumbnail_url is naturally included. featured_deals (server.py:1049) and browse_deals (server.py:1107) explicitly set item_thumbnail with fallback. All correct.",
+    "Frontend Skeleton.tsx uses Animated.Value opacity 0.4→1 loop (700ms each way, useNativeDriver=true) — clean shimmer effect. RestaurantSkeleton (row layout matches real restaurant card) and DealSkeleton (180px wide, 120px image) faithfully mirror the real card shapes so the layout doesn't jump when data replaces skeletons.",
+    "Frontend CachedImage.tsx uses expo-image with cachePolicy='memory-disk', blurhash placeholder, 200ms transition, recyclingKey=uri — correct. Note: passing `source={uri || undefined}` when uri is missing yields the blur placeholder cleanly (no broken-image icon).",
+    "Frontend home.tsx refreshSilently (home.tsx:93-110) awaits ONLY the first-page restaurant fetch and updates state, then fires drops + featured in fire-and-forget promises — matches 'silent refresh, no full-screen skeleton flash'. Guarded by firstFocus ref so the first mount doesn't double-fire.",
+    "Frontend home.tsx (line 519-528): PARTIAL REGRESSION — the loading-state early-return uses a centered ActivityIndicator instead of the restaurant ListSkeleton which lives further down as ListEmptyComponent. This causes the restaurant section (below the surplus row) to fall back to a single spinner during first load.",
+    "No deprecated packages (expo-av, expo-barcode-scanner, expo-background-fetch) detected in files_of_reference. No SafeAreaView regressions."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_thumbnails.py (new — 6 pytest cases)"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 test_thumbnails.py PASS)",
+    "frontend": "~85% — skeletons work on Browse Deals & Surplus & Home-drops-row; silent refresh works; images render; only regression is Home restaurant section falling back to ActivityIndicator instead of restaurant skeleton on first load"
+  },
+  "seed_data_creation": "Ephemeral test-only data: created 1 active vendor (TEST_ThumbVendor) with 2 menu items (TEST_ThumbItem surplus + TEST_BrowseItem discounted normal) via /api/ops/vendors + /api/ops/vendors/{id}/menu, each with a 1500/1200/800px base64 PNG image to force thumbnail generation. Cleaned up in the fixture teardown via DELETE /api/ops/vendors/{id}. Post-run DB state: 0 TEST vendors, 1 stray TEST_Item (menu_86e2ce68391f) which pre-existed on the draft vendor from an earlier iteration and is not related to this run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend thumbnail generation + list-endpoint propagation is fully validated by /app/backend/tests/test_thumbnails.py (6/6 pass). If a next round retests, keep in mind that (a) the /ops/vendors POST body needs hours in the `{ start, end }` shape (NOT `{ open, close }`) and (b) featured-deals only surfaces a vendor's item if at least one NORMAL discounted item exists (not just surplus) — so create a browse item too. To visually re-test the Home restaurant skeleton after fix, delay /api/restaurants by ~4s using page.route and look for 5 restaurant-shaped skeleton rows below the surplus row.",
+  "rca_of_issue": "Home restaurant-list skeleton unreachable: home.tsx has TWO loading placeholders — (A) a top-level early-return with a centered ActivityIndicator when `loading===true`, and (B) a FlatList ListEmptyComponent that renders `<ListSkeleton variant='restaurant' />` when data is empty. Because (A) fires first, (B) is never reached during initial load. Fix: either (i) inline the ListSkeleton into the early-return in place of the ActivityIndicator, or (ii) drop the early-return entirely so the FlatList renders with 0 items and its ListEmptyComponent skeleton shows."
+}

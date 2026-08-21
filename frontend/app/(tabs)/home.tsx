@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, Image, ActivityIndicator, RefreshControl, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck, Tag, Leaf } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
 import CachedImage from '../../src/components/CachedImage';
+import { ListSkeleton } from '../../src/components/Skeleton';
 import * as Location from 'expo-location';
 
 // Default: Bangalore
@@ -47,6 +48,7 @@ export default function HomeScreen() {
   const [rOffset, setROffset] = useState(0);
   const [rHasMore, setRHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [dropsLoading, setDropsLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
@@ -87,6 +89,34 @@ export default function HomeScreen() {
     loadData();
   }, [search, selectedCategory, lat, lon]);
 
+  // Cache freshness: silently re-fetch when returning to Home so new deals show up.
+  const refreshSilently = useCallback(async () => {
+    try {
+      const restRes = await restaurantsApi.list({
+        lat, lon, search: search || undefined, category: selectedCategory || undefined,
+        limit: PAGE_SIZE, offset: 0,
+      });
+      const list = restRes || [];
+      setRestaurants(list);
+      setROffset(list.length);
+      setRHasMore(list.length === PAGE_SIZE);
+      dropsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined })
+        .then((d) => setDrops(d || [])).catch(() => {});
+      restaurantsApi.featuredDeals({ lat, lon })
+        .then((f) => setFeatured(f || [])).catch(() => {});
+    } catch (err) {
+      console.log('Silent refresh failed', err);
+    }
+  }, [lat, lon, search, selectedCategory]);
+
+  const firstFocus = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocus.current) { firstFocus.current = false; return; }
+      refreshSilently();
+    }, [refreshSilently]),
+  );
+
   const loadCategories = async () => {
     try {
       const data = await dropsApi.categories();
@@ -112,8 +142,9 @@ export default function HomeScreen() {
       setLoading(false);
     }
     // Surplus + featured load in the background so a slow call never blocks the page
+    setDropsLoading(true);
     dropsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined })
-      .then((d) => setDrops(d || [])).catch(() => {});
+      .then((d) => setDrops(d || [])).catch(() => {}).finally(() => setDropsLoading(false));
     restaurantsApi.featuredDeals({ lat, lon })
       .then((f) => setFeatured(f || [])).catch(() => {});
   };
@@ -155,7 +186,7 @@ export default function HomeScreen() {
         activeOpacity={0.85}
       >
         <View>
-          <CachedImage uri={item.image_url} style={styles.surplusImage} />
+          <CachedImage uri={item.thumbnail_url || item.image_url} style={styles.surplusImage} />
           {discount > 0 ? (
             <View style={styles.discountBadge}>
               <Text style={styles.discountBadgeText}>{discount}% OFF</Text>
@@ -201,7 +232,7 @@ export default function HomeScreen() {
     >
       <View>
         {item.item_image ? (
-          <CachedImage uri={item.item_image} style={styles.featuredImage} />
+          <CachedImage uri={item.item_thumbnail || item.item_image} style={styles.featuredImage} />
         ) : (
           <View style={[styles.featuredImage, styles.featuredImagePlaceholder]}>
             <Store size={26} color={COLORS.textMuted} />
@@ -433,7 +464,9 @@ export default function HomeScreen() {
         </View>
         <Text style={styles.sectionSub}>Upto 70% off. Grab it before it&apos;s gone</Text>
       </View>
-      {vegDrops.length === 0 ? (
+      {dropsLoading ? (
+        <ListSkeleton count={3} variant="deal" />
+      ) : vegDrops.length === 0 ? (
         <View style={styles.surplusEmpty}>
           <Text style={styles.surplusEmptyText}>No surplus deals right now. Check back soon!</Text>
         </View>
@@ -487,9 +520,7 @@ export default function HomeScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         {ListHeader}
-        <View style={styles.centerLoader}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
+        <ListSkeleton count={5} variant="restaurant" />
       </SafeAreaView>
     );
   }
@@ -508,7 +539,9 @@ export default function HomeScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
         }
         ListEmptyComponent={
-          loading ? null : (
+          loading ? (
+            <ListSkeleton count={5} variant="restaurant" />
+          ) : (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No restaurants found</Text>
               <Text style={styles.emptySubtitle}>Try adjusting your search or filters.</Text>
