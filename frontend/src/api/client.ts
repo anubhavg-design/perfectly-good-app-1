@@ -228,7 +228,7 @@ export const restaurantsApi = {
 
 // Orders endpoints
 export const ordersApi = {
-  create: (data: { food_item_id: string; quantity: number; order_type?: string }) =>
+  create: (data: { food_item_id: string; quantity: number; order_type?: string; shift_start?: string; shift_end?: string }) =>
     apiFetch('/orders/create', { method: 'POST', body: JSON.stringify(data) }),
 
   verify: (data: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string; food_item_id: string; quantity: number; order_type?: string }) =>
@@ -281,6 +281,9 @@ export const vendorApi = {
 
   updateProfile: (data: { address?: string; phone?: string }) =>
     apiFetch('/vendor/profile', { method: 'PUT', body: JSON.stringify(data) }),
+
+  updateHours: (hours: any) =>
+    apiFetch('/vendor/hours', { method: 'PUT', body: JSON.stringify({ hours }) }),
 
   payoutsSummary: () => apiFetch('/vendor/payouts/summary'),
 

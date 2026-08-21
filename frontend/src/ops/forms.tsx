@@ -6,6 +6,7 @@ import { Field, TextField, Dropdown, Chips, Toggle, Btn } from './ui';
 import { C, SP, R } from './theme';
 import { useAuth } from '../context/AuthContext';
 import { opsApi } from '../api/opsApi';
+import HoursEditor, { hoursFromProfile, validateHours } from '../components/HoursEditor';
 
 async function pickImage(): Promise<string | null> {
   const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], base64: true, quality: 0.5 });
@@ -32,6 +33,7 @@ export function VendorForm({ initial, categories, onSubmit, submitting }: any) {
   const [err, setErr] = useState('');
   const [opsList, setOpsList] = useState<any[]>([]);
   const [picking, setPicking] = useState(false);
+  const [hours, setHours] = useState(hoursFromProfile(initial || {}));
 
   useEffect(() => {
     if (isAdmin) opsApi.assignableOps().then(setOpsList).catch(() => {});
@@ -47,8 +49,10 @@ export function VendorForm({ initial, categories, onSubmit, submitting }: any) {
     if (!isEdit && !f.email.trim()) return setErr('Email is required');
     const disc = Number(f.discount_percentage) || 0;
     if (disc < 0 || disc > 90) return setErr('Discount % must be between 0 and 90');
+    const hErr = validateHours(hours);
+    if (hErr) return setErr(hErr);
     setErr('');
-    onSubmit({ ...f, discount_percentage: disc });
+    onSubmit({ ...f, discount_percentage: disc, hours });
   };
 
   return (
@@ -97,10 +101,9 @@ export function VendorForm({ initial, categories, onSubmit, submitting }: any) {
       <Field label="Full Address"><TextField value={f.full_address} onChangeText={(v: string) => set('full_address', v)} placeholder="Street, area, city" multiline /></Field>
       <Field label="Google Maps Link"><TextField value={f.maps_link} onChangeText={(v: string) => set('maps_link', v)} placeholder="https://maps.google.com/…" /></Field>
       <Field label="Service Type"><Chips value={f.service_type} options={SERVICE_TYPES} onChange={(v) => set('service_type', v)} /></Field>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.md }}>
-        <Field label="Pickup Start"><TextField value={f.pickup_start_time} onChangeText={(v: string) => set('pickup_start_time', v)} placeholder="18:00" /></Field>
-        <Field label="Pickup End"><TextField value={f.pickup_end_time} onChangeText={(v: string) => set('pickup_end_time', v)} placeholder="21:00" /></Field>
-      </View>
+      <Field label="Operating Hours">
+        <HoursEditor value={hours} onChange={setHours} />
+      </Field>
       <Field label="Status"><Chips value={f.status} options={['active', 'inactive']} onChange={(v) => set('status', v)} /></Field>
       <View style={{ marginTop: SP.sm }}><Btn title={isEdit ? 'Save Changes' : 'Create Vendor'} onPress={submit} loading={submitting} full /></View>
     </View>

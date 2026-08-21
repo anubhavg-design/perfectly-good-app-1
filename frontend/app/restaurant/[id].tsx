@@ -11,6 +11,14 @@ import { restaurantsApi } from '../../src/api/client';
 
 type Tab = 'surplus' | 'takeaway' | 'dine_in';
 
+function fmt12(t: string): string {
+  if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return t || '';
+  const [h, m] = t.split(':').map(Number);
+  const ap = h < 12 ? 'AM' : 'PM';
+  const hh = h % 12 || 12;
+  return `${hh}:${String(m).padStart(2, '0')} ${ap}`;
+}
+
 const TABS: { key: Tab; label: string }[] = [
   { key: 'surplus', label: 'Surplus' },
   { key: 'takeaway', label: 'Takeaway' },
@@ -77,6 +85,9 @@ export default function RestaurantScreen() {
         maxQty: String(isSurplus ? (item.quantity_available ?? 0) : 0),
         imageUrl: item.image_url || '',
         orderType,
+        isOpen: vendor.is_open ? '1' : '0',
+        openStatusText: vendor.open_status_text || '',
+        todayShifts: JSON.stringify(vendor.today_shifts || []),
       },
     });
   };
@@ -128,13 +139,18 @@ export default function RestaurantScreen() {
               <Tag size={12} color={COLORS.primary} />
               <Text style={styles.metaChipText}>{vendor.category}</Text>
             </View>
-            {vendor.pickup_start_time ? (
-              <View style={styles.metaChip}>
-                <Clock size={12} color={COLORS.textSecondary} />
-                <Text style={styles.metaChipText}>{vendor.pickup_start_time}–{vendor.pickup_end_time}</Text>
-              </View>
-            ) : null}
+            <View style={[styles.metaChip, { backgroundColor: (vendor.is_open ? COLORS.success : COLORS.accentUrgent) + '18' }]}>
+              <Clock size={12} color={vendor.is_open ? COLORS.success : COLORS.accentUrgent} />
+              <Text style={[styles.metaChipText, { color: vendor.is_open ? COLORS.success : COLORS.accentUrgent, fontFamily: 'DMSans_700Bold' }]}>
+                {vendor.is_open ? 'Open now' : (vendor.open_status_text || 'Closed')}
+              </Text>
+            </View>
           </View>
+          {vendor.today_shifts && vendor.today_shifts.length > 0 ? (
+            <Text style={styles.hoursLine}>Today: {vendor.today_shifts.map((s: any) => `${fmt12(s.start)}–${fmt12(s.end)}`).join(', ')}</Text>
+          ) : (
+            <Text style={styles.hoursLine}>Closed today</Text>
+          )}
           <TouchableOpacity style={styles.addressRow} onPress={openMaps} activeOpacity={0.7}>
             <MapPin size={14} color={COLORS.primary} />
             <Text style={styles.addressText} numberOfLines={2}>{loc.address || 'Nearby'}</Text>
@@ -302,6 +318,7 @@ const styles = StyleSheet.create({
   metaChipText: { fontSize: 12, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
   addressRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: SPACING.sm },
   addressText: { flex: 1, fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary },
+  hoursLine: { fontSize: 12.5, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary, marginTop: SPACING.sm },
   tabBar: {
     flexDirection: 'row', backgroundColor: COLORS.surface, marginTop: SPACING.sm,
     paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, gap: SPACING.sm,

@@ -682,9 +682,107 @@ async def get_drop(item_id: str, lat: Optional[float] = None, lon: Optional[floa
 #  RESTAURANTS  (customer browse: surplus + takeaway + dine-in)
 # ══════════════════════════════════════════════════════════════════════════
 
+# ── Operating hours / shifts ────────────────────────────────────────────
+DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+DAY_LABELS = {"mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
+              "fri": "Friday", "sat": "Saturday", "sun": "Sunday"}
+_TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _t2m(t: str) -> int:
+    h, m = t.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _fmt12(t: str) -> str:
+    h, m = map(int, t.split(":"))
+    ap = "AM" if h < 12 else "PM"
+    hh = h % 12 or 12
+    return f"{hh}:{m:02d} {ap}"
+
+
+def _vendor_hours(v: dict) -> dict:
+    """Normalized weekly hours {day: [{start,end} sorted]}. Falls back to the
+    legacy single pickup window applied to every day."""
+    h = v.get("hours")
+    if isinstance(h, dict):
+        out = {}
+        for d in DAYS:
+            clean = []
+            for s in (h.get(d) or []):
+                st = (s or {}).get("start"); en = (s or {}).get("end")
+                if _TIME_RE.match(str(st or "")) and _TIME_RE.match(str(en or "")) and _t2m(en) > _t2m(st):
+                    clean.append({"start": st, "end": en})
+            clean.sort(key=lambda x: _t2m(x["start"]))
+            out[d] = clean
+        return out
+    s = v.get("pickup_start_time"); e = v.get("pickup_end_time")
+    if _TIME_RE.match(str(s or "")) and _TIME_RE.match(str(e or "")) and _t2m(e) > _t2m(s):
+        return {d: [{"start": s, "end": e}] for d in DAYS}
+    return {d: [] for d in DAYS}
+
+
+def _validate_hours(hours: dict) -> dict:
+    if not isinstance(hours, dict):
+        raise HTTPException(status_code=400, detail="Invalid hours format")
+    result = {}
+    for d in DAYS:
+        shifts = hours.get(d) or []
+        if not isinstance(shifts, list):
+            raise HTTPException(status_code=400, detail=f"Invalid shifts for {DAY_LABELS[d]}")
+        if len(shifts) > 2:
+            raise HTTPException(status_code=400, detail=f"You can add at most 2 shifts on {DAY_LABELS[d]}")
+        norm = []
+        for s in shifts:
+            st = (s or {}).get("start"); en = (s or {}).get("end")
+            if not _TIME_RE.match(str(st or "")) or not _TIME_RE.match(str(en or "")):
+                raise HTTPException(status_code=400, detail=f"Enter valid times (HH:MM) for {DAY_LABELS[d]}")
+            if _t2m(en) <= _t2m(st):
+                raise HTTPException(status_code=400, detail=f"On {DAY_LABELS[d]}, close time must be after open time")
+            norm.append({"start": st, "end": en})
+        norm.sort(key=lambda x: _t2m(x["start"]))
+        for i in range(1, len(norm)):
+            if _t2m(norm[i]["start"]) < _t2m(norm[i - 1]["end"]):
+                raise HTTPException(status_code=400, detail=f"Shifts overlap on {DAY_LABELS[d]}")
+        result[d] = norm
+    return result
+
+
+def _open_status(v: dict) -> dict:
+    """Current open/closed status based on the vendor's weekly shifts (IST)."""
+    hours = _vendor_hours(v)
+    now = datetime.now(IST)
+    cur = now.hour * 60 + now.minute
+    wd = now.weekday()  # Mon=0
+    for sh in hours.get(DAYS[wd], []):
+        if _t2m(sh["start"]) <= cur < _t2m(sh["end"]):
+            return {"is_open": True, "current_shift": sh, "next_open": None,
+                    "next_open_display": None, "status_text": f"Open · closes {_fmt12(sh['end'])}"}
+    for offset in range(0, 8):
+        day = DAYS[(wd + offset) % 7]
+        for sh in hours.get(day, []):
+            if offset == 0 and _t2m(sh["start"]) <= cur:
+                continue
+            disp = _fmt12(sh["start"])
+            if offset == 0:
+                text = f"Opening again at {disp}"
+            elif offset == 1:
+                text = f"Opens tomorrow at {disp}"
+            else:
+                text = f"Opens {DAY_LABELS[day]} at {disp}"
+            return {"is_open": False, "current_shift": None, "next_open": sh["start"],
+                    "next_open_day": day, "next_open_display": disp, "status_text": text}
+    return {"is_open": False, "current_shift": None, "next_open": None,
+            "next_open_display": None, "status_text": "Closed"}
+
+
+
 def _vendor_public(v: dict) -> dict:
     ver = v.get("verification") or {}
     agreement = ver.get("agreement") or {}
+    st = _open_status(v)
+    hours = _vendor_hours(v)
+    today = DAYS[datetime.now(IST).weekday()]
     return {
         "vendor_id": v.get("vendor_id"),
         "name": v.get("name", ""),
@@ -696,6 +794,11 @@ def _vendor_public(v: dict) -> dict:
         "discount_percentage": v.get("discount_percentage", 0) or 0,
         "pickup_start_time": v.get("pickup_start_time", ""),
         "pickup_end_time": v.get("pickup_end_time", ""),
+        "hours": hours,
+        "today_shifts": hours.get(today, []),
+        "is_open": st["is_open"],
+        "open_status_text": st["status_text"],
+        "next_open_display": st.get("next_open_display"),
         # Verified = admin-approved (active) AND has completed compliance (FSSAI + accepted agreement).
         "verified": v.get("status") == "active" and bool(agreement.get("accepted")) and bool((ver.get("fssai_number") or "").strip()),
     }
@@ -984,6 +1087,8 @@ class CreateOrderBody(BaseModel):
     food_item_id: str
     quantity: int
     order_type: Optional[str] = "surplus"  # "surplus" | "takeaway" | "dine_in"
+    shift_start: Optional[str] = None
+    shift_end: Optional[str] = None
 
 class VerifyOrderBody(BaseModel):
     razorpay_order_id: str
@@ -1026,6 +1131,25 @@ async def create_order(body: CreateOrderBody, request: Request):
     if not _ov or _ov.get("status") != "active":
         raise HTTPException(status_code=400, detail="This restaurant is not currently accepting orders.")
 
+    # Restaurant must be open (within a shift), and the chosen pickup shift must
+    # be one of today's shifts that hasn't ended yet.
+    open_st = _open_status(_ov)
+    if not open_st["is_open"]:
+        raise HTTPException(status_code=400, detail=f"{_ov.get('name', 'This restaurant')} is closed right now. {open_st['status_text']}.")
+    now_ist = datetime.now(IST)
+    cur_min = now_ist.hour * 60 + now_ist.minute
+    today_shifts = [s for s in _vendor_hours(_ov).get(DAYS[now_ist.weekday()], []) if _t2m(s["end"]) > cur_min]
+    chosen_shift = None
+    if body.shift_start and body.shift_end:
+        for s in today_shifts:
+            if s["start"] == body.shift_start and s["end"] == body.shift_end:
+                chosen_shift = s
+                break
+        if not chosen_shift:
+            raise HTTPException(status_code=400, detail="Selected pickup time is no longer available. Please pick another slot.")
+    else:
+        chosen_shift = open_st.get("current_shift") or (today_shifts[0] if today_shifts else None)
+
     cfg = await get_settings_doc()
     subtotal = round(unit_price * body.quantity, 2)
     gst = round(subtotal * cfg.get("gst_rate", 0.05), 2)
@@ -1058,6 +1182,8 @@ async def create_order(body: CreateOrderBody, request: Request):
         "unit_price": round(unit_price, 2),
         "item_subtotal": round(subtotal, 2),
         "total_amount": total,
+        "pickup_start_time": (chosen_shift or {}).get("start", ""),
+        "pickup_end_time": (chosen_shift or {}).get("end", ""),
         "created_at": datetime.now(timezone.utc),
     })
 
@@ -1120,8 +1246,8 @@ async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optio
         "pickup_verified_at": None,
         "pickup_verified_by": None,
         "payment_confirmed_at": now,
-        "pickup_start_time": vendor.get("pickup_start_time", "") if vendor else "",
-        "pickup_end_time": vendor.get("pickup_end_time", "") if vendor else "",
+        "pickup_start_time": pending.get("pickup_start_time") or (vendor.get("pickup_start_time", "") if vendor else ""),
+        "pickup_end_time": pending.get("pickup_end_time") or (vendor.get("pickup_end_time", "") if vendor else ""),
         "razorpay_order_id": rzp_order_id,
         "razorpay_payment_id": razorpay_payment_id,
         "created_at": now,
@@ -1614,8 +1740,8 @@ class CreateDropBody(BaseModel):
     menu_item_id: str
     discounted_price: float
     quantity_available: int
-    pickup_start_time: str
-    pickup_end_time: str
+    pickup_start_time: Optional[str] = None
+    pickup_end_time: Optional[str] = None
     expiry: Optional[str] = None
 
 class ToggleDropBody(BaseModel):
@@ -1659,6 +1785,24 @@ async def update_vendor_profile(body: UpdateVendorProfileBody, request: Request)
         await db.vendors.update_one({"vendor_id": vendor["vendor_id"]}, {"$set": updates})
     updated = await db.vendors.find_one({"vendor_id": vendor["vendor_id"]}, {"_id": 0})
     return updated
+
+class VendorHoursBody(BaseModel):
+    hours: dict
+
+@api.put("/vendor/hours")
+async def update_vendor_hours(body: VendorHoursBody, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in VENDOR_ROLES:
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await _resolve_vendor(user)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    validated = _validate_hours(body.hours)
+    await db.vendors.update_one(
+        {"vendor_id": vendor["vendor_id"]},
+        {"$set": {"hours": validated, "updated_at": datetime.now(timezone.utc)}},
+    )
+    return {"hours": validated}
 
 @api.get("/vendor/menu")
 async def vendor_menu(request: Request):
@@ -2277,6 +2421,7 @@ class OpsVendorBody(BaseModel):
     assigned_ops: Optional[str] = ""
     discount_percentage: Optional[float] = 0
     storefront_image: Optional[str] = ""
+    hours: Optional[dict] = None
 
 class OpsMenuItemBody(BaseModel):
     name: str
@@ -2475,6 +2620,8 @@ async def ops_create_vendor(body: OpsVendorBody, request: Request):
         "storefront_image": body.storefront_image or "",
         "notes": [], "created_at": now, "updated_at": now, "last_order_date": None,
     }
+    if body.hours is not None:
+        vendor_doc["hours"] = _validate_hours(body.hours)
     await db.vendors.insert_one(vendor_doc)
     vendor_doc.pop("_id", None)
     for k in ("created_at", "updated_at"):
@@ -2520,6 +2667,7 @@ async def ops_vendor_detail(vendor_id: str, request: Request):
     v["total_paid"] = total_paid
     v["pending_payout"] = round(net - total_paid, 2)
     v["payout_history"] = payouts
+    v["hours"] = _vendor_hours(v)
     return v
 
 
@@ -2541,6 +2689,8 @@ async def ops_update_vendor(vendor_id: str, body: OpsVendorBody, request: Reques
         "storefront_image": body.storefront_image or "",
         "updated_at": datetime.now(timezone.utc),
     }
+    if body.hours is not None:
+        updates["hours"] = _validate_hours(body.hours)
     # Only admins may (re)assign vendors to an ops member.
     if user.get("role") == "admin":
         updates["assigned_ops"] = body.assigned_ops or ""

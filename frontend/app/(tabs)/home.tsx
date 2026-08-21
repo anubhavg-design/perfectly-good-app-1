@@ -213,6 +213,11 @@ export default function HomeScreen() {
         </View>
         <Text style={styles.restCategory} numberOfLines={1}>{item.category}</Text>
         <View style={styles.restMetaRow}>
+          <View style={[styles.statusPill, { backgroundColor: (item.is_open ? COLORS.success : COLORS.accentUrgent) + '18' }]}>
+            <Text style={[styles.statusPillText, { color: item.is_open ? COLORS.success : COLORS.accentUrgent }]}>
+              {item.is_open ? 'Open' : 'Closed'}
+            </Text>
+          </View>
           {item.distance != null ? (
             <View style={styles.restMeta}>
               <MapPin size={12} color={COLORS.textMuted} />
@@ -564,6 +569,8 @@ const styles = StyleSheet.create({
   surplusPillText: { fontSize: 11.5, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
   discountPill: { backgroundColor: COLORS.accentUrgent + '18', borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm, paddingVertical: 2 },
   discountPillText: { fontSize: 11.5, fontFamily: 'DMSans_700Bold', color: COLORS.accentUrgent },
+  statusPill: { borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm, paddingVertical: 2 },
+  statusPillText: { fontSize: 11.5, fontFamily: 'DMSans_700Bold' },
 
   emptyState: { alignItems: 'center', paddingTop: 40 },
   emptyTitle: { fontSize: 20, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, marginBottom: SPACING.xs },

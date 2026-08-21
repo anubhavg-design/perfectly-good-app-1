@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Plus, Package, ShoppingBag, Clock, CheckCircle, XCircle, Wallet, IndianRupee, Settings, MapPin, Phone, List, Pencil, Camera, X, KeyRound, ShieldCheck, ChevronRight, Users, Trash2 } from 'lucide-react-native';
+import HoursEditor, { HoursMap, emptyHours, hoursFromProfile, validateHours } from '../../src/components/HoursEditor';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
@@ -87,6 +88,8 @@ export default function DashboardScreen() {
   const [editPhone, setEditPhone] = useState('');
   const [saving, setSaving] = useState(false);
   const [vendorStatus, setVendorStatus] = useState<string>('active');
+  const [hours, setHours] = useState<HoursMap>(emptyHours());
+  const [savingHours, setSavingHours] = useState(false);
   // Change password state
   const [curPwd, setCurPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
@@ -162,6 +165,7 @@ export default function DashboardScreen() {
         setVendorProfile(profile);
         setEditAddress(profile?.location?.address || '');
         setEditPhone(profile?.phone || '');
+        setHours(hoursFromProfile(profile));
       } else {
         const [summary, ords] = await Promise.all([
           vendorApi.payoutsSummary(),
@@ -632,6 +636,37 @@ export default function DashboardScreen() {
               disabled={saving}
             >
               {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Save Changes</Text>}
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.settingsCard}>
+            <View style={styles.settingsLabelRow}>
+              <Clock size={16} color={COLORS.textSecondary} />
+              <Text style={styles.settingsTitle}>Operating Hours</Text>
+            </View>
+            <Text style={styles.settingsHint}>Set up to two shifts per day (e.g. lunch and dinner). Customers can only order and pick up during these hours.</Text>
+            <View style={{ marginTop: SPACING.sm }}>
+              <HoursEditor value={hours} onChange={setHours} />
+            </View>
+            <TouchableOpacity
+              testID="save-hours-btn"
+              style={[styles.saveBtn, savingHours && { opacity: 0.7 }]}
+              onPress={async () => {
+                const err = validateHours(hours);
+                if (err) { Alert.alert('Check hours', err); return; }
+                setSavingHours(true);
+                try {
+                  await vendorApi.updateHours(hours);
+                  Alert.alert('Saved', 'Your operating hours have been updated');
+                } catch (e: any) {
+                  Alert.alert('Error', e.message);
+                } finally {
+                  setSavingHours(false);
+                }
+              }}
+              disabled={savingHours}
+            >
+              {savingHours ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Save Hours</Text>}
             </TouchableOpacity>
           </View>
 

@@ -24,6 +24,9 @@ export default function CheckoutScreen() {
     imageUrl: string;
     orderType: string;
     resume: string;
+    isOpen: string;
+    openStatusText: string;
+    todayShifts: string;
   }>();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
@@ -31,6 +34,23 @@ export default function CheckoutScreen() {
   const [loading, setLoading] = useState(false);
   const [showRazorpay, setShowRazorpay] = useState(false);
   const [razorpayData, setRazorpayData] = useState<any>(null);
+
+  // Parse today's shifts and keep only those that haven't ended yet (device local time ≈ IST).
+  const fmt12 = (t: string) => {
+    if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return t || '';
+    const [h, m] = t.split(':').map(Number);
+    const ap = h < 12 ? 'AM' : 'PM';
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ap}`;
+  };
+  const allShifts: { start: string; end: string }[] = React.useMemo(() => {
+    try { return JSON.parse(params.todayShifts || '[]'); } catch { return []; }
+  }, [params.todayShifts]);
+  const nowMin = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
+  const t2m = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  const selectableShifts = allShifts.filter((s) => t2m(s.end) > nowMin);
+  const isClosed = params.isOpen === '0' || selectableShifts.length === 0;
+  const [shiftIdx, setShiftIdx] = useState(0);
+  const chosenShift = selectableShifts[shiftIdx] || selectableShifts[0] || null;
 
   // Reserving an item requires an account. Guests are sent to the login screen
   // and returned to this exact checkout afterwards to continue their reservation.
@@ -59,12 +79,18 @@ export default function CheckoutScreen() {
   const totalSavings = (originalPrice - price) * quantity;
 
   const handleReserve = async () => {
+    if (isClosed) {
+      Alert.alert('Restaurant closed', params.openStatusText || 'This restaurant is closed right now.');
+      return;
+    }
     setLoading(true);
     try {
       const orderData = await ordersApi.create({
         food_item_id: params.itemId!,
         quantity,
         order_type: orderType,
+        shift_start: chosenShift?.start,
+        shift_end: chosenShift?.end,
       });
       setRazorpayData(orderData);
       setShowRazorpay(true);
@@ -259,6 +285,39 @@ export default function CheckoutScreen() {
           <Text style={styles.maxQtyHint}>{orderType === 'surplus' ? `Max available: ${maxQty}` : ' '}</Text>
         </View>
 
+        {/* Closed banner */}
+        {isClosed ? (
+          <View style={styles.closedBanner}>
+            <Text style={styles.closedBannerTitle}>Restaurant is closed</Text>
+            <Text style={styles.closedBannerText}>{params.openStatusText || 'Ordering is unavailable right now.'}</Text>
+          </View>
+        ) : null}
+
+        {/* Pickup Slot */}
+        {!isClosed && selectableShifts.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Pickup Slot</Text>
+            <View style={styles.slotRow}>
+              {selectableShifts.map((s, i) => {
+                const active = i === shiftIdx;
+                return (
+                  <TouchableOpacity
+                    key={`${s.start}-${s.end}`}
+                    testID={`shift-${i}`}
+                    style={[styles.slotChip, active && styles.slotChipActive]}
+                    onPress={() => setShiftIdx(i)}
+                  >
+                    <Text style={[styles.slotChipText, active && styles.slotChipTextActive]}>
+                      {fmt12(s.start)} – {fmt12(s.end)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.maxQtyHint}>Collect your order during this window.</Text>
+          </View>
+        ) : null}
+
         {/* Price Breakdown */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Price Breakdown</Text>
@@ -299,15 +358,15 @@ export default function CheckoutScreen() {
       <View style={styles.bottomBar}>
         <TouchableOpacity
           testID="pay-now-btn"
-          style={[styles.payBtn, loading && styles.payBtnDisabled]}
+          style={[styles.payBtn, (loading || isClosed) && styles.payBtnDisabled]}
           onPress={handleReserve}
-          disabled={loading}
+          disabled={loading || isClosed}
           activeOpacity={0.8}
         >
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.payBtnText}>Pay ₹{money(total)}</Text>
+            <Text style={styles.payBtnText}>{isClosed ? 'Closed' : `Pay ₹${money(total)}`}</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -339,6 +398,14 @@ const styles = StyleSheet.create({
   qtyBtnDisabled: { backgroundColor: COLORS.borderLight },
   qtyValue: { fontSize: 24, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary, minWidth: 40, textAlign: 'center' },
   maxQtyHint: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textAlign: 'center', marginTop: SPACING.xs },
+  slotRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+  slotChip: { paddingHorizontal: SPACING.md, paddingVertical: 10, borderRadius: RADIUS.md, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, ...SHADOWS.small },
+  slotChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  slotChipText: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary },
+  slotChipTextActive: { color: '#fff' },
+  closedBanner: { backgroundColor: COLORS.accentUrgent + '15', borderRadius: RADIUS.lg, padding: SPACING.md, marginBottom: SPACING.md, borderWidth: 1, borderColor: COLORS.accentUrgent + '40' },
+  closedBannerTitle: { fontSize: 15, fontFamily: 'Outfit_700Bold', color: COLORS.accentUrgent },
+  closedBannerText: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
   priceCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, ...SHADOWS.small },
   priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: SPACING.xs + 2 },
   priceLabel: { fontSize: 15, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary },
