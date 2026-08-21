@@ -9,6 +9,7 @@ import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import GuestGate from '../../src/components/GuestGate';
 import { SUPPORT_WHATSAPP_NUMBER } from '../../src/constants/support';
+import { vendorApi } from '../../src/api/client';
 
 const VENDOR_CONTACT_EMAIL = 'chaitanya@perfectlygood.in';
 const STAFF_ROLES = ['admin', 'semi_admin', 'operations', 'customer_success', 'finance'];
@@ -51,9 +52,16 @@ export default function ProfileScreen() {
   };
 
   const isVendor = user?.role === 'vendor' || user?.role === 'vendor_staff';
+  const [vendorRestaurant, setVendorRestaurant] = useState('');
+
+  React.useEffect(() => {
+    if (!isVendor) return;
+    vendorApi.profile().then((p: any) => setVendorRestaurant(p?.name || '')).catch(() => {});
+  }, [isVendor]);
 
   const openVendorWhatsapp = async () => {
-    const msg = `Hi Perfectly Good team, I'm a vendor and need some help.`;
+    const who = vendorRestaurant || user?.name || 'my restaurant';
+    const msg = `Hi Perfectly Good team, I'm the vendor for "${who}" and need some help.`;
     const url = `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
     try {
       await Linking.openURL(url);

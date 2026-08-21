@@ -287,6 +287,9 @@ export const vendorApi = {
   updateHours: (hours: any) =>
     apiFetch('/vendor/hours', { method: 'PUT', body: JSON.stringify({ hours }) }),
 
+  updateClosures: (dates: string[]) =>
+    apiFetch('/vendor/closures', { method: 'PUT', body: JSON.stringify({ dates }) }),
+
   payoutsSummary: () => apiFetch('/vendor/payouts/summary'),
 
   payoutsOrders: () => apiFetch('/vendor/payouts/orders'),

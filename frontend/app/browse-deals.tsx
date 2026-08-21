@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, MapPin, BadgeCheck, Tag } from 'lucide-react-native';
+import { ArrowLeft, MapPin, BadgeCheck, Tag, Leaf } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { restaurantsApi } from '../src/api/client';
@@ -33,6 +33,7 @@ export default function BrowseDealsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [sortBy, setSortBy] = useState('discount');
   const [priceMax, setPriceMax] = useState(0);
+  const [vegOnly, setVegOnly] = useState(false);
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
 
@@ -119,7 +120,15 @@ export default function BrowseDealsScreen() {
           <ArrowLeft size={24} color={COLORS.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Browse Deals</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity
+          testID="veg-only-toggle"
+          style={[styles.vegToggle, vegOnly && styles.vegToggleActive]}
+          onPress={() => setVegOnly((v) => !v)}
+          activeOpacity={0.8}
+        >
+          <Leaf size={14} color={vegOnly ? '#fff' : COLORS.success} />
+          <Text style={[styles.vegToggleText, vegOnly && styles.vegToggleTextActive]}>Veg</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.sortBarWrap}>
@@ -171,7 +180,12 @@ export default function BrowseDealsScreen() {
       ) : (
         <FlatList
           testID="browse-deals-list"
-          data={priceMax ? deals.filter((d) => (d.price ?? d.original_price) < priceMax) : deals}
+          data={(() => {
+            let list = deals;
+            if (vegOnly) list = list.filter((d) => d.food_type !== 'non_veg');
+            if (priceMax) list = list.filter((d) => (d.price ?? d.original_price) < priceMax);
+            return list;
+          })()}
           renderItem={renderDeal}
           keyExtractor={(item) => item.item_id}
           contentContainerStyle={styles.listContent}
@@ -198,6 +212,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
   },
   headerTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  vegToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm + 2, paddingVertical: 6, borderWidth: 1, borderColor: COLORS.success, backgroundColor: COLORS.surface },
+  vegToggleActive: { backgroundColor: COLORS.success, borderColor: COLORS.success },
+  vegToggleText: { fontSize: 12.5, fontFamily: 'DMSans_700Bold', color: COLORS.success },
+  vegToggleTextActive: { color: '#fff' },
 
   sortBarWrap: { borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
   sortBar: { paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, gap: SPACING.sm },

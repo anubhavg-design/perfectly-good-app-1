@@ -90,6 +90,7 @@ export default function DashboardScreen() {
   const [vendorStatus, setVendorStatus] = useState<string>('active');
   const [hours, setHours] = useState<HoursMap>(emptyHours());
   const [savingHours, setSavingHours] = useState(false);
+  const [closures, setClosures] = useState<string[]>([]);
   // Change password state
   const [curPwd, setCurPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
@@ -166,6 +167,7 @@ export default function DashboardScreen() {
         setEditAddress(profile?.location?.address || '');
         setEditPhone(profile?.phone || '');
         setHours(hoursFromProfile(profile));
+        setClosures(profile?.special_closures || []);
       } else {
         const [summary, ords] = await Promise.all([
           vendorApi.payoutsSummary(),
@@ -668,6 +670,63 @@ export default function DashboardScreen() {
             >
               {savingHours ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Save Hours</Text>}
             </TouchableOpacity>
+
+            <View style={styles.closureDivider} />
+            <View style={styles.settingsLabelRow}>
+              <Clock size={16} color={COLORS.textSecondary} />
+              <Text style={styles.settingsTitle}>Holidays & Closures</Text>
+            </View>
+            <Text style={styles.settingsHint}>Mark a one-off holiday without changing your weekly hours. On these dates you&apos;ll show as closed and won&apos;t take orders.</Text>
+            <View style={styles.closureQuickRow}>
+              {[0, 1].map((offset) => {
+                const d = new Date(); d.setDate(d.getDate() + offset);
+                const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                const on = closures.includes(ds);
+                const label = offset === 0 ? 'Closed today' : 'Closed tomorrow';
+                return (
+                  <TouchableOpacity
+                    key={offset}
+                    testID={`closure-toggle-${offset}`}
+                    style={[styles.closureQuickBtn, on && styles.closureQuickBtnActive]}
+                    onPress={async () => {
+                      const next = on ? closures.filter((x) => x !== ds) : [...closures, ds];
+                      try {
+                        const res = await vendorApi.updateClosures(next);
+                        setClosures(res.special_closures || []);
+                      } catch (e: any) { Alert.alert('Error', e.message); }
+                    }}
+                  >
+                    <Text style={[styles.closureQuickText, on && styles.closureQuickTextActive]}>
+                      {on ? `✓ ${label}` : label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {closures.length > 0 ? (
+              <View style={styles.closureList}>
+                {closures.map((ds) => (
+                  <View key={ds} style={styles.closureChip}>
+                    <Text style={styles.closureChipText}>{ds}</Text>
+                    <TouchableOpacity
+                      testID={`closure-remove-${ds}`}
+                      hitSlop={8}
+                      onPress={async () => {
+                        const next = closures.filter((x) => x !== ds);
+                        try {
+                          const res = await vendorApi.updateClosures(next);
+                          setClosures(res.special_closures || []);
+                        } catch (e: any) { Alert.alert('Error', e.message); }
+                      }}
+                    >
+                      <X size={14} color={COLORS.error} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.closureEmpty}>No upcoming closures.</Text>
+            )}
           </View>
 
           <View style={styles.settingsCard}>
@@ -928,6 +987,16 @@ const styles = StyleSheet.create({
   settingsLabel: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.textPrimary },
   settingsInput: { backgroundColor: COLORS.background, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, paddingVertical: 12, fontSize: 15, fontFamily: 'DMSans_400Regular', color: COLORS.textPrimary },
   settingsHint: { fontSize: 11, fontFamily: 'DMSans_400Regular', color: COLORS.primary, marginTop: 4 },
+  closureDivider: { height: 1, backgroundColor: COLORS.borderLight, marginVertical: SPACING.lg },
+  closureQuickRow: { flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.md },
+  closureQuickBtn: { flex: 1, paddingVertical: SPACING.sm + 2, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.surface, alignItems: 'center' },
+  closureQuickBtnActive: { backgroundColor: COLORS.accentUrgent + '15', borderColor: COLORS.accentUrgent },
+  closureQuickText: { fontSize: 13.5, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary },
+  closureQuickTextActive: { color: COLORS.accentUrgent },
+  closureList: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginTop: SPACING.md },
+  closureChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.borderLight, borderRadius: RADIUS.full, paddingLeft: SPACING.md, paddingRight: SPACING.sm, paddingVertical: 6 },
+  closureChipText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textPrimary },
+  closureEmpty: { fontSize: 12.5, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, marginTop: SPACING.sm },
   currentLocation: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.primary + '10', borderRadius: RADIUS.md, padding: SPACING.sm, marginBottom: SPACING.md },
   currentLocationText: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, flex: 1 },
   saveBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 14, alignItems: 'center', marginTop: SPACING.sm },

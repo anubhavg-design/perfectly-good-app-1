@@ -767,16 +767,24 @@ def _validate_hours(hours: dict) -> dict:
 
 
 def _open_status(v: dict) -> dict:
-    """Current open/closed status based on the vendor's weekly shifts (IST)."""
+    """Current open/closed status based on the vendor's weekly shifts (IST),
+    honouring one-off closures/holidays in `special_closures` (list of YYYY-MM-DD)."""
     hours = _vendor_hours(v)
+    closures = set(v.get("special_closures") or [])
     now = datetime.now(IST)
     cur = now.hour * 60 + now.minute
     wd = now.weekday()  # Mon=0
-    for sh in hours.get(DAYS[wd], []):
-        if _t2m(sh["start"]) <= cur < _t2m(sh["end"]):
-            return {"is_open": True, "current_shift": sh, "next_open": None,
-                    "next_open_display": None, "status_text": f"Open · closes {_fmt12(sh['end'])}"}
+    today_date = now.date()
+    today_str = today_date.isoformat()
+    if today_str not in closures:
+        for sh in hours.get(DAYS[wd], []):
+            if _t2m(sh["start"]) <= cur < _t2m(sh["end"]):
+                return {"is_open": True, "current_shift": sh, "next_open": None,
+                        "next_open_display": None, "status_text": f"Open · closes {_fmt12(sh['end'])}"}
     for offset in range(0, 8):
+        day_date = today_date + timedelta(days=offset)
+        if day_date.isoformat() in closures:
+            continue
         day = DAYS[(wd + offset) % 7]
         for sh in hours.get(day, []):
             if offset == 0 and _t2m(sh["start"]) <= cur:
@@ -1878,6 +1886,36 @@ async def update_vendor_hours(body: VendorHoursBody, request: Request):
         {"$set": {"hours": validated, "updated_at": datetime.now(timezone.utc)}},
     )
     return {"hours": validated}
+
+class VendorClosuresBody(BaseModel):
+    dates: list  # ["YYYY-MM-DD", ...]
+
+@api.put("/vendor/closures")
+async def update_vendor_closures(body: VendorClosuresBody, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in VENDOR_ROLES:
+        raise HTTPException(status_code=403, detail="Not a vendor")
+    vendor = await _resolve_vendor(user)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor profile not found")
+    date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    today = datetime.now(IST).date()
+    cleaned = set()
+    for d in (body.dates or []):
+        if not isinstance(d, str) or not date_re.match(d):
+            raise HTTPException(status_code=400, detail="Invalid date format (use YYYY-MM-DD)")
+        try:
+            dd = datetime.strptime(d, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid date: {d}")
+        if dd >= today:  # drop past dates
+            cleaned.add(d)
+    result = sorted(cleaned)
+    await db.vendors.update_one(
+        {"vendor_id": vendor["vendor_id"]},
+        {"$set": {"special_closures": result, "updated_at": datetime.now(timezone.utc)}},
+    )
+    return {"special_closures": result}
 
 @api.get("/vendor/menu")
 async def vendor_menu(request: Request):

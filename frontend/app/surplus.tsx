@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, MapPin, Sparkles } from 'lucide-react-native';
+import { ArrowLeft, MapPin, Sparkles, Leaf } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { dropsApi } from '../src/api/client';
@@ -28,6 +28,7 @@ export default function SurplusScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [priceMax, setPriceMax] = useState(0);
+  const [vegOnly, setVegOnly] = useState(false);
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
 
@@ -111,7 +112,11 @@ export default function SurplusScreen() {
     );
   };
 
-  const data = priceMax ? drops.filter((d) => activePrice(d) < priceMax) : drops;
+  const data = drops.filter((d) => {
+    if (vegOnly && d.food_type === 'non_veg') return false;
+    if (priceMax && !(activePrice(d) < priceMax)) return false;
+    return true;
+  });
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -120,7 +125,15 @@ export default function SurplusScreen() {
           <ArrowLeft size={24} color={COLORS.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Surplus Deals</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity
+          testID="veg-only-toggle"
+          style={[styles.vegToggle, vegOnly && styles.vegToggleActive]}
+          onPress={() => setVegOnly((v) => !v)}
+          activeOpacity={0.8}
+        >
+          <Leaf size={14} color={vegOnly ? '#fff' : COLORS.success} />
+          <Text style={[styles.vegToggleText, vegOnly && styles.vegToggleTextActive]}>Veg</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.priceBarWrap}>
@@ -168,6 +181,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   headerTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  vegToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm + 2, paddingVertical: 6, borderWidth: 1, borderColor: COLORS.success, backgroundColor: COLORS.surface },
+  vegToggleActive: { backgroundColor: COLORS.success, borderColor: COLORS.success },
+  vegToggleText: { fontSize: 12.5, fontFamily: 'DMSans_700Bold', color: COLORS.success },
+  vegToggleTextActive: { color: '#fff' },
   priceBarWrap: { borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
   priceBar: { paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, gap: SPACING.sm },
   priceChip: { paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs + 2, borderRadius: RADIUS.full, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, marginRight: SPACING.sm },
