@@ -17,7 +17,7 @@ import * as Location from 'expo-location';
 // Default: Bangalore
 const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 10;
 
 function getTimeRemaining(endTime: string) {
   if (!endTime) return '';
@@ -37,6 +37,62 @@ function getDiscount(original: number, discounted: number) {
   if (!original) return 0;
   return Math.round(((original - discounted) / original) * 100);
 }
+
+const RestaurantCard = React.memo(function RestaurantCard({ item, onPress }: { item: any; onPress: (id: string) => void }) {
+  return (
+    <TouchableOpacity
+      testID={`restaurant-card-${item.vendor_id}`}
+      style={styles.restCard}
+      onPress={() => onPress(item.vendor_id)}
+      activeOpacity={0.85}
+    >
+      {item.storefront_image || item.logo_url ? (
+        <CachedImage uri={item.storefront_image || item.logo_url} style={styles.restLogo} />
+      ) : (
+        <View style={[styles.restLogo, styles.restLogoPlaceholder]}>
+          <Text style={styles.restLogoInitial}>{(item.name || '?').charAt(0).toUpperCase()}</Text>
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <View style={styles.restNameRow}>
+          <Text style={styles.restName} numberOfLines={1}>{item.name}</Text>
+          {item.verified ? (
+            <View style={styles.verifiedBadge}>
+              <BadgeCheck size={12} color={COLORS.primary} />
+              <Text style={styles.verifiedText}>Verified</Text>
+            </View>
+          ) : null}
+        </View>
+        <Text style={styles.restCategory} numberOfLines={1}>{item.category}</Text>
+        <View style={styles.restMetaRow}>
+          <View style={[styles.statusPill, { backgroundColor: (item.is_open ? COLORS.success : COLORS.accentUrgent) + '18' }]}>
+            <Text style={[styles.statusPillText, { color: item.is_open ? COLORS.success : COLORS.accentUrgent }]}>
+              {item.is_open ? 'Open' : 'Closed'}
+            </Text>
+          </View>
+          {item.distance != null ? (
+            <View style={styles.restMeta}>
+              <MapPin size={12} color={COLORS.textMuted} />
+              <Text style={styles.restMetaText}>{item.distance} km</Text>
+            </View>
+          ) : null}
+          {item.discount_percentage > 0 ? (
+            <View style={styles.discountPill}>
+              <Text style={styles.discountPillText}>{item.discount_percentage}% OFF</Text>
+            </View>
+          ) : null}
+          {item.surplus_count > 0 ? (
+            <View style={styles.surplusPill}>
+              <Sparkles size={11} color={COLORS.primary} />
+              <Text style={styles.surplusPillText}>{item.surplus_count} surplus</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+      <ChevronRight size={20} color={COLORS.textMuted} />
+    </TouchableOpacity>
+  );
+});
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -175,6 +231,8 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [search, selectedCategory, lat, lon]);
 
+  const openRestaurant = useCallback((vendorId: string) => router.push(`/restaurant/${vendorId}`), [router]);
+
   const renderSurplusCard = ({ item }: { item: any }) => {
     const activePrice = item.price ?? item.discounted_price ?? item.original_price;
     const discount = getDiscount(item.original_price, activePrice);
@@ -269,59 +327,9 @@ export default function HomeScreen() {
     </TouchableOpacity>
   );
 
-  const renderRestaurant = ({ item }: { item: any }) => (
-    <TouchableOpacity
-      testID={`restaurant-card-${item.vendor_id}`}
-      style={styles.restCard}
-      onPress={() => router.push(`/restaurant/${item.vendor_id}`)}
-      activeOpacity={0.85}
-    >
-      {item.storefront_image || item.logo_url ? (
-        <CachedImage uri={item.storefront_image || item.logo_url} style={styles.restLogo} />
-      ) : (
-        <View style={[styles.restLogo, styles.restLogoPlaceholder]}>
-          <Text style={styles.restLogoInitial}>{(item.name || '?').charAt(0).toUpperCase()}</Text>
-        </View>
-      )}
-      <View style={{ flex: 1 }}>
-        <View style={styles.restNameRow}>
-          <Text style={styles.restName} numberOfLines={1}>{item.name}</Text>
-          {item.verified ? (
-            <View style={styles.verifiedBadge}>
-              <BadgeCheck size={12} color={COLORS.primary} />
-              <Text style={styles.verifiedText}>Verified</Text>
-            </View>
-          ) : null}
-        </View>
-        <Text style={styles.restCategory} numberOfLines={1}>{item.category}</Text>
-        <View style={styles.restMetaRow}>
-          <View style={[styles.statusPill, { backgroundColor: (item.is_open ? COLORS.success : COLORS.accentUrgent) + '18' }]}>
-            <Text style={[styles.statusPillText, { color: item.is_open ? COLORS.success : COLORS.accentUrgent }]}>
-              {item.is_open ? 'Open' : 'Closed'}
-            </Text>
-          </View>
-          {item.distance != null ? (
-            <View style={styles.restMeta}>
-              <MapPin size={12} color={COLORS.textMuted} />
-              <Text style={styles.restMetaText}>{item.distance} km</Text>
-            </View>
-          ) : null}
-          {item.discount_percentage > 0 ? (
-            <View style={styles.discountPill}>
-              <Text style={styles.discountPillText}>{item.discount_percentage}% OFF</Text>
-            </View>
-          ) : null}
-          {item.surplus_count > 0 ? (
-            <View style={styles.surplusPill}>
-              <Sparkles size={11} color={COLORS.primary} />
-              <Text style={styles.surplusPillText}>{item.surplus_count} surplus</Text>
-            </View>
-          ) : null}
-        </View>
-      </View>
-      <ChevronRight size={20} color={COLORS.textMuted} />
-    </TouchableOpacity>
-  );
+  const renderRestaurant = useCallback(({ item }: { item: any }) => (
+    <RestaurantCard item={item} onPress={openRestaurant} />
+  ), [openRestaurant]);
 
   const isVeg = (ft: string) => ft !== 'non_veg';
   const vegDrops = vegOnly ? drops.filter((d: any) => isVeg(d.food_type)) : drops;

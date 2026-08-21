@@ -15,7 +15,7 @@ import { ListSkeleton } from '../src/components/Skeleton';
 
 const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 10;
 
 const SORT_OPTIONS = [
   { key: 'price', label: 'Price: Low to High' },
@@ -30,6 +30,39 @@ const PRICE_FILTERS = [
   { key: 200, label: 'Under ₹200' },
   { key: 300, label: 'Under ₹300' },
 ];
+
+const DealCard = React.memo(function DealCard({ item, onPress }: { item: any; onPress: (id: string) => void }) {
+  return (
+    <TouchableOpacity
+      testID={`browse-deal-${item.item_id}`}
+      style={styles.card}
+      onPress={() => onPress(item.vendor_id)}
+      activeOpacity={0.85}
+    >
+      <CachedImage uri={item.item_thumbnail || item.item_image} style={styles.cardImage} />
+      <View style={styles.cardBody}>
+        <Text style={styles.cardName} numberOfLines={1}>{item.item_name}</Text>
+        <View style={styles.vendorRow}>
+          <Text style={styles.cardVendor} numberOfLines={1}>{item.vendor_name}</Text>
+          {item.verified ? <BadgeCheck size={12} color={COLORS.primary} /> : null}
+        </View>
+        <View style={styles.priceRow}>
+          <Text style={styles.price}>₹{item.price}</Text>
+          <Text style={styles.strike}>₹{item.original_price}</Text>
+          {item.distance != null ? (
+            <View style={styles.distMeta}>
+              <MapPin size={11} color={COLORS.textMuted} />
+              <Text style={styles.distText}>{item.distance} km</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.discountBadge}>
+        <Text style={styles.discountBadgeText}>{item.discount}% OFF</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 export default function BrowseDealsScreen() {
   const router = useRouter();
@@ -99,36 +132,10 @@ export default function BrowseDealsScreen() {
     setRefreshing(false);
   }, [loadData]);
 
-  const renderDeal = ({ item }: { item: any }) => (
-    <TouchableOpacity
-      testID={`browse-deal-${item.item_id}`}
-      style={styles.card}
-      onPress={() => router.push(`/restaurant/${item.vendor_id}`)}
-      activeOpacity={0.85}
-    >
-      <CachedImage uri={item.item_thumbnail || item.item_image} style={styles.cardImage} />
-      <View style={styles.cardBody}>
-        <Text style={styles.cardName} numberOfLines={1}>{item.item_name}</Text>
-        <View style={styles.vendorRow}>
-          <Text style={styles.cardVendor} numberOfLines={1}>{item.vendor_name}</Text>
-          {item.verified ? <BadgeCheck size={12} color={COLORS.primary} /> : null}
-        </View>
-        <View style={styles.priceRow}>
-          <Text style={styles.price}>₹{item.price}</Text>
-          <Text style={styles.strike}>₹{item.original_price}</Text>
-          {item.distance != null ? (
-            <View style={styles.distMeta}>
-              <MapPin size={11} color={COLORS.textMuted} />
-              <Text style={styles.distText}>{item.distance} km</Text>
-            </View>
-          ) : null}
-        </View>
-      </View>
-      <View style={styles.discountBadge}>
-        <Text style={styles.discountBadgeText}>{item.discount}% OFF</Text>
-      </View>
-    </TouchableOpacity>
-  );
+  const openRestaurant = useCallback((vendorId: string) => router.push(`/restaurant/${vendorId}`), [router]);
+  const renderDeal = useCallback(({ item }: { item: any }) => (
+    <DealCard item={item} onPress={openRestaurant} />
+  ), [openRestaurant]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

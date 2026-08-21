@@ -4502,8 +4502,11 @@ async def seed_data():
     await db.menu_items.create_index("vendor_id")
     # Perf indexes for home/browse queries
     await db.vendors.create_index("status")
+    await db.vendors.create_index("category")
     await db.vendors.create_index([("status", 1), ("category", 1)])
+    await db.menu_items.create_index("available_today")
     await db.menu_items.create_index([("vendor_id", 1), ("available_today", 1)])
+    await db.menu_items.create_index([("available_today", 1), ("in_stock", 1)])
     await db.menu_items.create_index([("vendor_id", 1), ("in_stock", 1)])
     await db.menu_items.create_index("food_type")
     await db.orders.create_index([("vendor_id", 1), ("status", 1)])
