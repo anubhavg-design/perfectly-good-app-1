@@ -22,7 +22,7 @@
       "usesAppleSignIn": true
     },
     "android": {
-      "versionCode": 110,
+      "versionCode": 136,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"

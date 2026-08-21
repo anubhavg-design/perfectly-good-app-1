@@ -228,7 +228,7 @@ export default function BrowseDealsScreen() {
             </View>
           }
           onEndReached={loadMore}
-          onEndReachedThreshold={0.5}
+          onEndReachedThreshold={1.5}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
           windowSize={7}

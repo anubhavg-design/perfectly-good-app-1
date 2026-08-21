@@ -33,6 +33,13 @@ function resolveApiBase(): string {
 }
 
 const API_BASE = resolveApiBase();
+// Origin (without the trailing /api) — used to resolve relative /api/files/... image URLs.
+export const API_ORIGIN = API_BASE.replace(/\/api\/?$/, '');
+export function resolveMediaUrl(uri?: string): string {
+  if (!uri) return '';
+  if (uri.startsWith('/api/')) return `${API_ORIGIN}${uri}`;
+  return uri;
+}
 
 let accessToken: string | null = null;
 

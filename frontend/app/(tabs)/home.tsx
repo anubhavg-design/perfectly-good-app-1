@@ -11,6 +11,7 @@ import { dropsApi, restaurantsApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
 import CachedImage from '../../src/components/CachedImage';
 import VegDot from '../../src/components/VegDot';
+import CartBar from '../../src/components/CartBar';
 import { ListSkeleton } from '../../src/components/Skeleton';
 import * as Location from 'expo-location';
 
@@ -555,7 +556,7 @@ export default function HomeScreen() {
           )
         }
         onEndReached={loadMoreRestaurants}
-        onEndReachedThreshold={0.5}
+        onEndReachedThreshold={1.5}
         initialNumToRender={8}
         maxToRenderPerBatch={8}
         windowSize={7}
@@ -568,6 +569,7 @@ export default function HomeScreen() {
           ) : null
         }
       />
+      <CartBar bottomOffset={64} />
     </SafeAreaView>
   );
 }

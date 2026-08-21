@@ -9,7 +9,7 @@ import { useCart } from '../context/CartContext';
  * Floating "View Cart" bar. Renders only when the cart has items.
  * Optionally scoped to a vendor (only show while browsing that restaurant).
  */
-export default function CartBar({ vendorId }: { vendorId?: string }) {
+export default function CartBar({ vendorId, bottomOffset = 0 }: { vendorId?: string; bottomOffset?: number }) {
   const router = useRouter();
   const { cart, itemCount, subtotal } = useCart();
   if (!cart || itemCount === 0) return null;
@@ -18,7 +18,7 @@ export default function CartBar({ vendorId }: { vendorId?: string }) {
   return (
     <TouchableOpacity
       testID="view-cart-bar"
-      style={styles.bar}
+      style={[styles.bar, { bottom: SPACING.md + bottomOffset }]}
       onPress={() => router.push('/cart')}
       activeOpacity={0.9}
     >

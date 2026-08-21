@@ -10,7 +10,7 @@ import HoursEditor, { HoursMap, emptyHours, hoursFromProfile, validateHours } fr
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
-import { vendorApi } from '../../src/api/client';
+import { vendorApi, resolveMediaUrl } from '../../src/api/client';
 
 type TabType = 'menu' | 'drops' | 'orders' | 'earnings' | 'settings';
 type OrderFilter = 'reserved' | 'picked_up' | 'cancelled' | 'refunded';
@@ -305,7 +305,7 @@ export default function DashboardScreen() {
       <View testID={`vendor-menu-${item.menu_item_id}`} style={[styles.card, soldOut && styles.cardSoldOut]}>
         <View style={styles.cardRow}>
           {item.image_url ? (
-            <Image source={{ uri: item.image_url }} style={[styles.menuThumb, soldOut && styles.dimmed]} />
+            <Image source={{ uri: resolveMediaUrl(item.image_url) }} style={[styles.menuThumb, soldOut && styles.dimmed]} />
           ) : (
             <View style={[styles.menuThumb, styles.menuThumbEmpty, soldOut && styles.dimmed]}>
               <Camera size={18} color={COLORS.textMuted} />

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Image as RNImage, Text, StyleSheet } from 'react-native';
 import { Image, ImageContentFit } from 'expo-image';
 import { COLORS } from '../constants/theme';
+import { resolveMediaUrl } from '../api/client';
 
 // Neutral light-grey blurhash shown while the real image streams in.
 const BLUR_PLACEHOLDER = 'L6Pj0^i_.AyE_3t7t7R**0o#DgR4';
@@ -23,7 +24,8 @@ type Props = {
  * - When there's no image, renders a branded "No image available" placeholder.
  */
 export default function CachedImage({ uri, style, contentFit = 'cover', showLabel = false }: Props) {
-  if (!uri) {
+  const resolved = resolveMediaUrl(uri);
+  if (!resolved) {
     return (
       <View style={[styles.empty, style]}>
         <RNImage source={BRAND_MARK} style={styles.mark} resizeMode="contain" />
@@ -33,14 +35,14 @@ export default function CachedImage({ uri, style, contentFit = 'cover', showLabe
   }
   return (
     <Image
-      source={uri}
+      source={resolved}
       style={style}
       contentFit={contentFit}
       placeholder={BLUR_PLACEHOLDER}
       placeholderContentFit="cover"
       transition={200}
       cachePolicy="memory-disk"
-      recyclingKey={uri}
+      recyclingKey={resolved}
     />
   );
 }

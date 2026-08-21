@@ -15,8 +15,9 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional
 from fastapi import FastAPI, APIRouter, Request, HTTPException, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 import math
@@ -2163,9 +2164,10 @@ async def _bulk_update_images(vendor: dict, raw: bytes) -> dict:
             skipped.append({"filename": fname, "reason": "Image larger than 5 MB"})
             continue
         b64 = f"data:{_IMG_MIME[ext]};base64,{base64.b64encode(data).decode()}"
+        _full, _thumb = await _store_image_variants(b64, "menu")
         await db.menu_items.update_one(
             {"menu_item_id": item["menu_item_id"], "vendor_id": vendor["vendor_id"]},
-            {"$set": {"image_url": b64, "updated_at": datetime.now(timezone.utc)}},
+            {"$set": {"image_url": _full, "thumbnail_url": _thumb, "updated_at": datetime.now(timezone.utc)}},
         )
         matched.append({"filename": fname, "item_name": item["name"]})
         seen_items.add(item["menu_item_id"])
@@ -2800,7 +2802,7 @@ async def ops_create_vendor(body: OpsVendorBody, request: Request):
         "pickup_start_time": body.pickup_start_time or "18:00", "pickup_end_time": body.pickup_end_time or "21:00",
         "status": body.status or "draft", "assigned_ops": assigned,
         "discount_percentage": max(0.0, min(float(body.discount_percentage or 0), 90.0)),
-        "storefront_image": body.storefront_image or "",
+        "storefront_image": (await _store_image_variants(body.storefront_image or "", f"vendor/{vendor_id}"))[0],
         "notes": [], "created_at": now, "updated_at": now, "last_order_date": None,
     }
     if body.hours is not None:
@@ -2869,7 +2871,7 @@ async def ops_update_vendor(vendor_id: str, body: OpsVendorBody, request: Reques
         "service_type": body.service_type or "both", "pickup_start_time": body.pickup_start_time or "18:00",
         "pickup_end_time": body.pickup_end_time or "21:00", "status": body.status or "active",
         "discount_percentage": max(0.0, min(float(body.discount_percentage or 0), 90.0)),
-        "storefront_image": body.storefront_image or "",
+        "storefront_image": (await _store_image_variants(body.storefront_image or "", f"vendor/{vendor_id}"))[0],
         "updated_at": datetime.now(timezone.utc),
     }
     if body.hours is not None:
@@ -3438,6 +3440,96 @@ def _optimize_menu_images(image_url: str):
     return full, thumb
 
 
+# ---------------- Emergent Managed Object Storage ----------------
+# New image uploads go to object storage and are served via /api/files/{path}
+# instead of being embedded as base64 in DB (keeps list responses lightweight).
+_STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+_STORAGE_URL = _STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+_EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+_APP_NAME = "perfectly-good"
+_storage_key = None
+
+
+def _init_storage():
+    """Init once (idempotent). Returns a reusable storage_key."""
+    global _storage_key
+    if _storage_key:
+        return _storage_key
+    resp = http_requests.post(f"{_STORAGE_URL}/init", json={"emergent_key": _EMERGENT_KEY}, timeout=30)
+    resp.raise_for_status()
+    _storage_key = resp.json()["storage_key"]
+    return _storage_key
+
+
+def _storage_put(path: str, data: bytes, content_type: str) -> dict:
+    global _storage_key
+    key = _init_storage()
+    resp = http_requests.put(f"{_STORAGE_URL}/objects/{path}",
+                             headers={"X-Storage-Key": key, "Content-Type": content_type}, data=data, timeout=120)
+    if resp.status_code == 503:  # stale key -> reset + retry once
+        _storage_key = None
+        key = _init_storage()
+        resp = http_requests.put(f"{_STORAGE_URL}/objects/{path}",
+                                 headers={"X-Storage-Key": key, "Content-Type": content_type}, data=data, timeout=120)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _storage_get(path: str):
+    global _storage_key
+    key = _init_storage()
+    resp = http_requests.get(f"{_STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    if resp.status_code == 503:
+        _storage_key = None
+        key = _init_storage()
+        resp = http_requests.get(f"{_STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+
+def _data_uri_to_jpeg(uri: str, max_px: int, quality: int) -> bytes:
+    from PIL import Image as _PILImage
+    _, b64 = uri.split(",", 1)
+    raw = base64.b64decode(b64)
+    img = _PILImage.open(io.BytesIO(raw)).convert("RGB")
+    img.thumbnail((max_px, max_px))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
+async def _store_image_variants(image_url: str, owner: str):
+    """For a base64 data-URI image, upload a full (~1000px) + thumbnail (~320px)
+    JPEG to object storage and return (full_url, thumb_url) as /api/files/ paths.
+    Non-data-URI inputs (http/relative) pass through unchanged. Falls back to
+    inline base64 optimization if storage is unavailable."""
+    if not image_url or not isinstance(image_url, str) or not image_url.startswith("data:image"):
+        return image_url or "", image_url or ""
+    try:
+        full_bytes = await run_in_threadpool(_data_uri_to_jpeg, image_url, 1000, 78)
+        thumb_bytes = await run_in_threadpool(_data_uri_to_jpeg, image_url, 320, 60)
+        uid = uuid.uuid4().hex
+        full_path = f"{_APP_NAME}/uploads/{owner}/{uid}.jpg"
+        thumb_path = f"{_APP_NAME}/uploads/{owner}/{uid}_t.jpg"
+        await run_in_threadpool(_storage_put, full_path, full_bytes, "image/jpeg")
+        await run_in_threadpool(_storage_put, thumb_path, thumb_bytes, "image/jpeg")
+        return f"/api/files/{full_path}", f"/api/files/{thumb_path}"
+    except Exception as e:
+        logger.warning(f"Object storage upload failed, using inline base64: {e}")
+        return _optimize_menu_images(image_url)
+
+
+@api.get("/files/{path:path}")
+async def serve_file(path: str):
+    """Public read for catalog (restaurant/menu) images stored in object storage."""
+    try:
+        content, ctype = await run_in_threadpool(_storage_get, path)
+    except Exception:
+        raise HTTPException(status_code=404, detail="File not found")
+    return Response(content=content, media_type=ctype,
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 
 @api.post("/ops/vendors/{vendor_id}/menu")
 async def ops_add_menu_item(vendor_id: str, body: OpsMenuItemBody, request: Request):
@@ -3451,7 +3543,7 @@ async def ops_add_menu_item(vendor_id: str, body: OpsMenuItemBody, request: Requ
         dp = round(body.original_price * (1 - cfg["default_discount_pct"] / 100), 2)
     now = datetime.now(timezone.utc)
     _img = body.image_url or "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600"
-    _full, _thumb = _optimize_menu_images(_img)
+    _full, _thumb = await _store_image_variants(_img, "menu")
     doc = {
         "menu_item_id": gen_id("menu"), "vendor_id": vendor_id, "name": body.name,
         "description": body.description or "", "original_price": body.original_price,
@@ -3486,7 +3578,7 @@ async def ops_update_menu_item(menu_item_id: str, body: OpsMenuItemBody, request
     if body.quantity_available is not None:
         updates["quantity_available"] = body.quantity_available
     if body.image_url:
-        _full, _thumb = _optimize_menu_images(body.image_url)
+        _full, _thumb = await _store_image_variants(body.image_url, "menu")
         updates["image_url"] = _full
         updates["thumbnail_url"] = _thumb
     result = await db.menu_items.update_one({"menu_item_id": menu_item_id}, {"$set": updates})
@@ -4725,6 +4817,11 @@ async def startup():
                       id="pickup_reminders", replace_existing=True)
     if not scheduler.running:
         scheduler.start()
+    try:
+        await run_in_threadpool(_init_storage)
+        logger.info("Object storage initialized")
+    except Exception as e:
+        logger.warning(f"Object storage init failed (uploads will fall back to base64): {e}")
     logger.info("Perfectly Good API started")
 
 @app.on_event("shutdown")

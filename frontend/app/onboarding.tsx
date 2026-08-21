@@ -27,7 +27,7 @@ import {
   clearOnboardingProgress,
 } from '../src/utils/onboarding';
 import { ONBOARDING_ART, ArtFindDeals } from '../src/components/OnboardingArt';
-import { dropsApi, dealAlertsApi } from '../src/api/client';
+import { dropsApi, dealAlertsApi, resolveMediaUrl } from '../src/api/client';
 
 // Bengaluru default so we can surface a nearby deal before location is granted.
 const DEFAULT_LAT = 12.9716;
@@ -314,7 +314,7 @@ export default function Onboarding() {
               <TouchableOpacity testID="onboarding-deal-card" activeOpacity={0.9} style={styles.dealCard} onPress={() => openDeal(currentDeal.item_id)}>
                 <View style={styles.dealImageWrap}>
                   {currentDeal.image_url ? (
-                    <Image source={{ uri: currentDeal.image_url }} style={styles.dealImage} />
+                    <Image source={{ uri: resolveMediaUrl(currentDeal.image_url) }} style={styles.dealImage} />
                   ) : (
                     <View style={[styles.dealImage, styles.dealImagePlaceholder]}><ArtFindDeals /></View>
                   )}

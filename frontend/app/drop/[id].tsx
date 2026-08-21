@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Clock, MapPin, Users, Tag, ExternalLink } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
-import { dropsApi } from '../../src/api/client';
+import { dropsApi, resolveMediaUrl } from '../../src/api/client';
 import AddToCartSheet from '../../src/components/AddToCartSheet';
 import CartBar from '../../src/components/CartBar';
 import { AddMeta } from '../../src/context/CartContext';
@@ -82,7 +82,7 @@ export default function DropDetailScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Image */}
         <View style={styles.imageWrap}>
-          <Image source={{ uri: drop.image_url }} style={styles.heroImage} />
+          <Image source={{ uri: resolveMediaUrl(drop.image_url) }} style={styles.heroImage} />
           <SafeAreaView style={styles.imageOverlay} edges={['top']}>
             <TouchableOpacity testID="back-btn" style={styles.backBtnFloat} onPress={() => router.back()}>
               <ArrowLeft size={22} color={COLORS.textPrimary} />

@@ -6,6 +6,7 @@ import { Field, TextField, Dropdown, Chips, Toggle, Btn } from './ui';
 import { C, SP, R } from './theme';
 import { useAuth } from '../context/AuthContext';
 import { opsApi } from '../api/opsApi';
+import { resolveMediaUrl } from '../api/client';
 import HoursEditor, { hoursFromProfile, validateHours } from '../components/HoursEditor';
 
 async function pickImage(): Promise<string | null> {
@@ -63,7 +64,7 @@ export function VendorForm({ initial, categories, onSubmit, submitting }: any) {
       <Field label="Storefront Photo">
         <Pressable onPress={chooseStore} style={{ marginBottom: SP.md }}>
           {f.storefront_image ? (
-            <Image source={{ uri: f.storefront_image }} style={{ width: '100%', height: 150, borderRadius: R.md, backgroundColor: C.surfaceAlt }} />
+            <Image source={{ uri: resolveMediaUrl(f.storefront_image) }} style={{ width: '100%', height: 150, borderRadius: R.md, backgroundColor: C.surfaceAlt }} />
           ) : (
             <View style={{ height: 120, borderRadius: R.md, borderWidth: 1, borderColor: C.borderStrong, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
               <ImagePlus size={26} color={C.textMute} />
@@ -147,7 +148,7 @@ export function MenuItemForm({ initial, categories, onSubmit, submitting }: any)
       {err ? <Text style={{ color: C.danger, marginBottom: SP.sm }}>{err}</Text> : null}
       <Pressable onPress={choose} style={{ marginBottom: SP.md }}>
         {f.image_url ? (
-          <Image source={{ uri: f.image_url }} style={{ width: '100%', height: 150, borderRadius: R.md, backgroundColor: C.surfaceAlt }} />
+          <Image source={{ uri: resolveMediaUrl(f.image_url) }} style={{ width: '100%', height: 150, borderRadius: R.md, backgroundColor: C.surfaceAlt }} />
         ) : (
           <View style={{ height: 120, borderRadius: R.md, borderWidth: 1, borderColor: C.borderStrong, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             <ImagePlus size={26} color={C.textMute} />

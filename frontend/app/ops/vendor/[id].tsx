@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, Image, Linking, TextInput } from 're
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ChevronLeft, Pencil, Plus, Copy, Trash2, MapPin, Phone, Mail, Store, ExternalLink, FileSpreadsheet, Images, CheckSquare, Square } from 'lucide-react-native';
 import { opsApi } from '../../../src/api/opsApi';
+import { resolveMediaUrl } from '../../../src/api/client';
 import { C, SP, R, money, fmtDate, fmtDateTime, titleCase, hasPerm } from '../../../src/ops/theme';
 import { Card, Btn, Badge, Spinner, Sheet, ConfirmDialog, Toggle, DataTable, EmptyState } from '../../../src/ops/ui';
 import { VendorForm, MenuItemForm } from '../../../src/ops/forms';
@@ -87,7 +88,7 @@ export default function VendorProfile() {
       <Card style={{ marginBottom: SP.lg }}>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: SP.md, flexWrap: 'wrap' }}>
           {v.storefront_image ? (
-            <Image source={{ uri: v.storefront_image }} style={styles.storeImg} />
+            <Image source={{ uri: resolveMediaUrl(v.storefront_image) }} style={styles.storeImg} />
           ) : (
             <View style={styles.vendorIcon}><Store size={26} color={C.primaryDark} /></View>
           )}
@@ -180,7 +181,7 @@ export default function VendorProfile() {
                 {selected.has(it.menu_item_id) ? <CheckSquare size={20} color={C.primary} /> : <Square size={20} color={C.textMute} />}
               </Pressable>
             )}
-            <Image source={{ uri: it.image_url }} style={styles.itemImg} />
+            <Image source={{ uri: resolveMediaUrl(it.image_url) }} style={styles.itemImg} />
             <View style={{ flex: 1, minWidth: 160 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: SP.sm, flexWrap: 'wrap' }}>
                 <Text style={styles.itemName}>{it.name}</Text>
