@@ -215,6 +215,15 @@ export const restaurantsApi = {
     const qs = query.toString();
     return apiFetch(`/featured-deals${qs ? `?${qs}` : ''}`);
   },
+
+  browseDeals: (params: { lat?: number; lon?: number; sort_by?: string }) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    });
+    const qs = query.toString();
+    return apiFetch(`/browse-deals${qs ? `?${qs}` : ''}`);
+  },
 };
 
 // Orders endpoints

@@ -217,3 +217,9 @@
   - Response includes vendor + item fields + reason ("Bestseller"/"Top deal") + is_surplus. Tap → restaurant page.
   - Validated with seeded data: bestseller-with-highest-discount and top-deal fallback both correct.
 - Home screen (app/(tabs)/home.tsx): new "Featured Deals" horizontal section rendered immediately AFTER "Surplus Deals" and before "Nearby Restaurants". Hidden when empty or in surplus-only focus view. API: restaurantsApi.featuredDeals in src/api/client.ts.
+
+## Browse Deals feature (Aug 2026)
+- New GET /api/browse-deals?lat&lon&sort_by=price|discount|distance: all discounted NORMAL menu items (vendor discount_percentage>0 applied) across active vendors. Excludes surplus (available_today) and out-of-stock items. Returns item + vendor + verified + distance. Sorts: price asc / discount desc (default; tiebreak price) / distance asc. restaurantsApi.browseDeals in src/api/client.ts.
+- New screen app/browse-deals.tsx: back header "Browse Deals", horizontal sort chip bar (Price: Low to High / Discount: High to Low / Nearest to Me), list of deal cards (image, name, vendor+verified, price+strike+distance, % OFF badge). Tap card → /restaurant/{vendor_id}. Uses expo-location getForegroundPermissions (no new prompt). Registered route in app/_layout.tsx (slide_from_right).
+- Home entry: "Browse All Deals" card (testID browse-all-deals) placed at top of home ListHeader (after search, before Surplus Deals / restaurant list) → router.push('/browse-deals').
+- Validated all 3 sorts + surplus exclusion with seeded data; screens verified via screenshot.

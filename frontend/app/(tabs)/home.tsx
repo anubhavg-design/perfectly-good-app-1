@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck, Tag } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
@@ -326,13 +326,30 @@ export default function HomeScreen() {
         </View>
       )}
 
+      {/* Browse All Deals entry */}
+      <TouchableOpacity
+        testID="browse-all-deals"
+        style={styles.browseCard}
+        onPress={() => router.push('/browse-deals')}
+        activeOpacity={0.85}
+      >
+        <View style={styles.browseIcon}>
+          <Tag size={20} color="#fff" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.browseTitle}>Browse All Deals</Text>
+          <Text style={styles.browseSub}>Discounted menu items from every restaurant</Text>
+        </View>
+        <ChevronRight size={20} color={COLORS.primary} />
+      </TouchableOpacity>
+
       {/* Surplus Deals */}
       <View style={styles.sectionHead}>
         <View style={styles.sectionTitleRow}>
           <Sparkles size={18} color={COLORS.primary} />
           <Text style={styles.sectionTitle}>Surplus Deals</Text>
         </View>
-        <Text style={styles.sectionSub}>Up to 70% off — rescue before it's gone</Text>
+        <Text style={styles.sectionSub}>Up to 70% off — rescue before it&apos;s gone</Text>
       </View>
       {drops.length === 0 ? (
         <View style={styles.surplusEmpty}>
@@ -474,6 +491,18 @@ const styles = StyleSheet.create({
 
   sectionHead: { paddingHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: SPACING.sm },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  browseCard: {
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
+    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg,
+    marginHorizontal: SPACING.md, marginTop: SPACING.md,
+    padding: SPACING.md, borderWidth: 1, borderColor: COLORS.primary + '22', ...SHADOWS.small,
+  },
+  browseIcon: {
+    width: 40, height: 40, borderRadius: RADIUS.md, backgroundColor: COLORS.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  browseTitle: { fontSize: 16, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  browseSub: { fontSize: 12.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 1 },
   sectionTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
   sectionSub: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
 

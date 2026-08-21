@@ -909,6 +909,72 @@ async def featured_deals(lat: Optional[float] = None, lon: Optional[float] = Non
     results.sort(key=lambda r: (-(r["discount"] or 0), r["distance"] if r["distance"] is not None else 99999))
     return results
 
+@api.get("/browse-deals")
+async def browse_deals(
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    sort_by: Optional[str] = "discount",
+):
+    """All discounted NORMAL menu items (vendor flat discount applied) across
+    active restaurants. Surplus listings (available_today) are excluded."""
+    active_vendors = await db.vendors.find(
+        {"status": "active", "discount_percentage": {"$gt": 0}}, {"_id": 0}
+    ).to_list(500)
+    if not active_vendors:
+        return []
+    vendor_map = {v["vendor_id"]: v for v in active_vendors}
+    vendor_ids = list(vendor_map.keys())
+
+    items = await db.menu_items.find(
+        {"vendor_id": {"$in": vendor_ids}, "available_today": {"$ne": True}},
+        {"_id": 0},
+    ).to_list(100000)
+
+    results = []
+    for m in items:
+        if m.get("in_stock", True) is False:
+            continue
+        v = vendor_map.get(m.get("vendor_id"))
+        if not v:
+            continue
+        op = m.get("original_price") or 0
+        if op <= 0:
+            continue
+        disc = round(v.get("discount_percentage") or 0)
+        if disc <= 0:
+            continue
+        price = round(op * (1 - disc / 100), 2)
+        pub = _vendor_public(v)
+        loc = v.get("location", {}) or {}
+        dist = None
+        if lat is not None and lon is not None and loc.get("lat") and loc.get("lon"):
+            dist = round(haversine(lat, lon, loc["lat"], loc["lon"]), 1)
+        results.append({
+            "item_id": m.get("menu_item_id"),
+            "item_name": m.get("name", ""),
+            "item_image": m.get("image_url", ""),
+            "description": m.get("description", ""),
+            "food_type": m.get("food_type", "veg"),
+            "contains_egg": bool(m.get("contains_egg")),
+            "original_price": op,
+            "price": price,
+            "discount": disc,
+            "vendor_id": v.get("vendor_id"),
+            "vendor_name": v.get("name", ""),
+            "verified": pub.get("verified", False),
+            "distance": dist,
+        })
+
+    if sort_by == "price":
+        results.sort(key=lambda r: r["price"])
+    elif sort_by == "distance":
+        results.sort(key=lambda r: r["distance"] if r["distance"] is not None else 99999)
+    else:  # discount (default)
+        results.sort(key=lambda r: (-(r["discount"] or 0), r["price"]))
+    return results
+
+
+
 
 # ══════════════════════════════════════════════════════════════════════════
 #  ORDERS
