@@ -676,6 +676,8 @@ async def list_drops(
 
     if sort_by == "price":
         drops.sort(key=lambda d: d.get("discounted_price", 0))
+    elif sort_by == "price_desc":
+        drops.sort(key=lambda d: d.get("discounted_price", 0), reverse=True)
     elif sort_by == "discount":
         drops.sort(key=lambda d: (d.get("original_price", 1) - d.get("discounted_price", 0)) / max(d.get("original_price", 1), 1), reverse=True)
     elif lat and lon:
@@ -854,6 +856,7 @@ def _menu_public(m: dict, order_type: str, discount_pct: float = 0) -> dict:
         "contains_egg": bool(m.get("contains_egg")),
         "serving_size": m.get("serving_size", ""),
         "category": m.get("category", ""),
+        "menu_category": (m.get("menu_category") or "").strip(),
         "kcal": m.get("kcal"),
         "protein": m.get("protein"),
         "original_price": op,
@@ -1120,6 +1123,8 @@ async def browse_deals(
 
     if sort_by == "price":
         results.sort(key=lambda r: r["price"])
+    elif sort_by == "price_desc":
+        results.sort(key=lambda r: r["price"], reverse=True)
     elif sort_by == "distance":
         results.sort(key=lambda r: r["distance"] if r["distance"] is not None else 99999)
     else:  # discount (default)
@@ -2553,6 +2558,7 @@ class OpsMenuItemBody(BaseModel):
     original_price: float
     discounted_price: Optional[float] = None
     category: Optional[str] = ""
+    menu_category: Optional[str] = ""
     serving_size: Optional[str] = ""
     food_type: Optional[str] = "veg"
     contains_egg: Optional[bool] = False
@@ -3397,6 +3403,7 @@ async def ops_add_menu_item(vendor_id: str, body: OpsMenuItemBody, request: Requ
         "menu_item_id": gen_id("menu"), "vendor_id": vendor_id, "name": body.name,
         "description": body.description or "", "original_price": body.original_price,
         "discounted_price": dp, "category": body.category or vendor.get("category", ""),
+        "menu_category": (body.menu_category or "").strip(),
         "serving_size": body.serving_size or "", "food_type": body.food_type or "veg",
         "contains_egg": bool(body.contains_egg), "available_today": bool(body.available_today),
         "in_stock": True, "quantity_available": body.quantity_available,
@@ -3416,7 +3423,8 @@ async def ops_update_menu_item(menu_item_id: str, body: OpsMenuItemBody, request
     await require_permission(request, "manage_menu")
     updates = {
         "name": body.name, "description": body.description or "", "original_price": body.original_price,
-        "category": body.category or "", "serving_size": body.serving_size or "",
+        "category": body.category or "", "menu_category": (body.menu_category or "").strip(),
+        "serving_size": body.serving_size or "",
         "food_type": body.food_type or "veg", "contains_egg": bool(body.contains_egg),
         "available_today": bool(body.available_today), "updated_at": datetime.now(timezone.utc),
     }
@@ -4148,6 +4156,7 @@ def _normalize_menu_row(d: dict) -> dict:
         "discounted_price": _coerce_price(g("discounted price", "discount price", "sale price")),
         "serving_size": str(g("serving size", "serving") or ""),
         "category": str(g("category") or ""),
+        "menu_category": str(g("menu category", "section", "menu section", "group") or "").strip(),
         "food_type": "veg" if veg_is else "non_veg",
         "contains_egg": truthy(find("egg") or ""),
         "available_today": truthy(find("available today", "available", "live") or ""),
@@ -4201,6 +4210,7 @@ async def ops_bulk_add_menu(vendor_id: str, body: dict, request: Request):
             "menu_item_id": gen_id("menu"), "vendor_id": vendor_id, "name": name,
             "description": str(it.get("description") or ""), "original_price": op,
             "discounted_price": dp, "category": str(it.get("category") or vendor.get("category", "")),
+            "menu_category": str(it.get("menu_category") or "").strip(),
             "serving_size": str(it.get("serving_size") or ""), "food_type": it.get("food_type") or "veg",
             "contains_egg": bool(it.get("contains_egg")), "available_today": False,
             "in_stock": True, "quantity_available": None,

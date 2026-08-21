@@ -5,11 +5,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, MapPin, Sparkles, Leaf } from 'lucide-react-native';
+import { ArrowLeft, MapPin } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { dropsApi } from '../src/api/client';
 import CachedImage from '../src/components/CachedImage';
+import VegDot from '../src/components/VegDot';
 import { ListSkeleton } from '../src/components/Skeleton';
 
 const DEFAULT_LAT = 12.9716;
@@ -22,6 +23,13 @@ const PRICE_FILTERS = [
   { key: 300, label: 'Under ₹300' },
 ];
 
+const SORT_OPTIONS = [
+  { key: 'price', label: 'Price: Low to High' },
+  { key: 'price_desc', label: 'Price: High to Low' },
+  { key: 'discount', label: 'Discount: High to Low' },
+  { key: 'distance', label: 'Nearest to Me' },
+];
+
 const activePrice = (d: any) => (d.price ?? d.discounted_price ?? d.original_price ?? 0);
 
 export default function SurplusScreen() {
@@ -30,6 +38,7 @@ export default function SurplusScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [priceMax, setPriceMax] = useState(0);
+  const [sortBy, setSortBy] = useState('price');
   const [vegOnly, setVegOnly] = useState(false);
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
@@ -50,14 +59,14 @@ export default function SurplusScreen() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await dropsApi.list({ lat, lon });
+      const res = await dropsApi.list({ lat, lon, sort_by: sortBy });
       setDrops(res || []);
     } catch (err) {
       console.log('Failed to load surplus deals', err);
     } finally {
       setLoading(false);
     }
-  }, [lat, lon]);
+  }, [lat, lon, sortBy]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -79,13 +88,7 @@ export default function SurplusScreen() {
         onPress={() => router.push(`/drop/${item.item_id}`)}
         activeOpacity={0.85}
       >
-        {item.image_url ? (
-          <CachedImage uri={item.thumbnail_url || item.image_url} style={styles.cardImage} />
-        ) : (
-          <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
-            <Sparkles size={22} color={COLORS.textMuted} />
-          </View>
-        )}
+        <CachedImage uri={item.thumbnail_url || item.image_url} style={styles.cardImage} />
         <View style={styles.cardBody}>
           <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
           <Text style={styles.vendor} numberOfLines={1}>{item.vendor_name}</Text>
@@ -133,9 +136,27 @@ export default function SurplusScreen() {
           onPress={() => setVegOnly((v) => !v)}
           activeOpacity={0.8}
         >
-          <Leaf size={14} color={vegOnly ? '#fff' : COLORS.success} />
+          <VegDot size={14} color={vegOnly ? '#fff' : COLORS.success} />
           <Text style={[styles.vegToggleText, vegOnly && styles.vegToggleTextActive]}>Veg</Text>
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.priceBarWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.priceBar}>
+          {SORT_OPTIONS.map((opt) => {
+            const active = sortBy === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                testID={`sort-${opt.key}`}
+                style={[styles.sortChip, active && styles.sortChipActive]}
+                onPress={() => setSortBy(opt.key)}
+              >
+                <Text style={[styles.sortChipText, active && styles.sortChipTextActive]}>{opt.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
       <View style={styles.priceBarWrap}>
@@ -193,6 +214,10 @@ const styles = StyleSheet.create({
   priceChipActive: { backgroundColor: COLORS.primary + '15', borderColor: COLORS.primary },
   priceChipText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
   priceChipTextActive: { color: COLORS.primary, fontFamily: 'DMSans_700Bold' },
+  sortChip: { paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs + 2, borderRadius: RADIUS.full, backgroundColor: COLORS.borderLight, marginRight: SPACING.sm },
+  sortChipActive: { backgroundColor: COLORS.primary },
+  sortChipText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  sortChipTextActive: { color: '#fff' },
   centerLoader: { paddingVertical: 60, alignItems: 'center' },
   listContent: { padding: SPACING.md, gap: SPACING.md, paddingBottom: SPACING.xxl },
   card: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.sm, gap: SPACING.sm, borderWidth: 1, borderColor: COLORS.primary + '22', ...SHADOWS.small },

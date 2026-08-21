@@ -5,11 +5,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, MapPin, BadgeCheck, Tag, Leaf } from 'lucide-react-native';
+import { ArrowLeft, MapPin, BadgeCheck } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { restaurantsApi } from '../src/api/client';
 import CachedImage from '../src/components/CachedImage';
+import VegDot from '../src/components/VegDot';
 import { ListSkeleton } from '../src/components/Skeleton';
 
 const DEFAULT_LAT = 12.9716;
@@ -18,6 +19,7 @@ const PAGE_SIZE = 15;
 
 const SORT_OPTIONS = [
   { key: 'price', label: 'Price: Low to High' },
+  { key: 'price_desc', label: 'Price: High to Low' },
   { key: 'discount', label: 'Discount: High to Low' },
   { key: 'distance', label: 'Nearest to Me' },
 ];
@@ -34,7 +36,7 @@ export default function BrowseDealsScreen() {
   const [deals, setDeals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [sortBy, setSortBy] = useState('discount');
+  const [sortBy, setSortBy] = useState('price');
   const [priceMax, setPriceMax] = useState(0);
   const [vegOnly, setVegOnly] = useState(false);
   const [lat, setLat] = useState(DEFAULT_LAT);
@@ -104,13 +106,7 @@ export default function BrowseDealsScreen() {
       onPress={() => router.push(`/restaurant/${item.vendor_id}`)}
       activeOpacity={0.85}
     >
-      {item.item_image ? (
-        <CachedImage uri={item.item_thumbnail || item.item_image} style={styles.cardImage} />
-      ) : (
-        <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
-          <Tag size={22} color={COLORS.textMuted} />
-        </View>
-      )}
+      <CachedImage uri={item.item_thumbnail || item.item_image} style={styles.cardImage} />
       <View style={styles.cardBody}>
         <Text style={styles.cardName} numberOfLines={1}>{item.item_name}</Text>
         <View style={styles.vendorRow}>
@@ -151,7 +147,7 @@ export default function BrowseDealsScreen() {
           onPress={() => setVegOnly((v) => !v)}
           activeOpacity={0.8}
         >
-          <Leaf size={14} color={vegOnly ? '#fff' : COLORS.success} />
+          <VegDot size={14} color={vegOnly ? '#fff' : COLORS.success} />
           <Text style={[styles.vegToggleText, vegOnly && styles.vegToggleTextActive]}>Veg</Text>
         </TouchableOpacity>
       </View>

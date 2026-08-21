@@ -113,6 +113,7 @@ export function VendorForm({ initial, categories, onSubmit, submitting }: any) {
 export function MenuItemForm({ initial, categories, onSubmit, submitting }: any) {
   const [f, setF] = useState({
     name: '', description: '', original_price: '', discounted_price: '', category: '',
+    menu_category: '',
     serving_size: '', food_type: 'veg', contains_egg: false, available_today: false, image_url: '',
     ...(initial || {}),
   });
@@ -135,6 +136,7 @@ export function MenuItemForm({ initial, categories, onSubmit, submitting }: any)
     onSubmit({
       name: f.name, description: f.description, original_price: op,
       discounted_price: dp, category: f.category, serving_size: f.serving_size,
+      menu_category: (f.menu_category || '').trim(),
       food_type: f.food_type, contains_egg: !!f.contains_egg, available_today: !!f.available_today,
       image_url: f.image_url,
     });
@@ -170,6 +172,9 @@ export function MenuItemForm({ initial, categories, onSubmit, submitting }: any)
         <Field label="Category"><Dropdown value={f.category} onChange={(v) => set('category', v)} options={(categories || []).map((c: string) => ({ label: c, value: c }))} placeholder="Select" /></Field>
         <Field label="Serving Size"><TextField value={f.serving_size} onChangeText={(v: string) => set('serving_size', v)} placeholder="Serves 1-2" /></Field>
       </View>
+      <Field label="Menu Category">
+        <TextField value={f.menu_category} onChangeText={(v: string) => set('menu_category', v)} placeholder="e.g. Starters, Mains, Drinks" />
+      </Field>
       <Field label="Veg / Non-Veg"><Chips value={f.food_type} options={['veg', 'non_veg']} onChange={(v) => set('food_type', v)} /></Field>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: SP.sm }}>
         <Text style={{ color: C.text, fontWeight: '600' }}>Contains Egg</Text>

@@ -5,11 +5,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck, Tag, Leaf } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck, Tag } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
 import CachedImage from '../../src/components/CachedImage';
+import VegDot from '../../src/components/VegDot';
 import { ListSkeleton } from '../../src/components/Skeleton';
 import * as Location from 'expo-location';
 
@@ -231,13 +232,7 @@ export default function HomeScreen() {
       activeOpacity={0.85}
     >
       <View>
-        {item.item_image ? (
-          <CachedImage uri={item.item_thumbnail || item.item_image} style={styles.featuredImage} />
-        ) : (
-          <View style={[styles.featuredImage, styles.featuredImagePlaceholder]}>
-            <Store size={26} color={COLORS.textMuted} />
-          </View>
-        )}
+        <CachedImage uri={item.item_thumbnail || item.item_image} style={styles.featuredImage} showLabel />
         <View style={styles.featuredReasonPill}>
           <Sparkles size={11} color="#fff" />
           <Text style={styles.featuredReasonText}>{item.reason}</Text>
@@ -376,7 +371,7 @@ export default function HomeScreen() {
           activeOpacity={0.8}
           accessibilityLabel="Veg only filter"
         >
-          <Leaf size={14} color={vegOnly ? '#fff' : COLORS.success} />
+          <VegDot size={14} color={vegOnly ? '#fff' : COLORS.success} />
           <Text style={[styles.vegToggleText, vegOnly && styles.vegToggleTextActive]}>Veg</Text>
         </TouchableOpacity>
       </View>
@@ -439,16 +434,19 @@ export default function HomeScreen() {
         testID="browse-all-deals"
         style={styles.browseCard}
         onPress={() => router.push('/browse-deals')}
-        activeOpacity={0.85}
+        activeOpacity={0.9}
       >
         <View style={styles.browseIcon}>
-          <Tag size={20} color="#fff" />
+          <Tag size={26} color="#fff" />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.browseTitle}>Browse All Deals</Text>
-          <Text style={styles.browseSub}>Discounted menu items from every restaurant</Text>
+          <Text style={styles.browseSub}>Discounted menu items from every restaurant near you</Text>
+          <View style={styles.browseCta}>
+            <Text style={styles.browseCtaText}>Explore deals</Text>
+            <ChevronRight size={16} color="#fff" />
+          </View>
         </View>
-        <ChevronRight size={20} color={COLORS.primary} />
       </TouchableOpacity>
 
       {/* Surplus Deals */}
@@ -637,17 +635,20 @@ const styles = StyleSheet.create({
   seeAllText: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   browseCard: {
-    flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-    backgroundColor: COLORS.surface, borderRadius: RADIUS.lg,
+    flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
+    backgroundColor: COLORS.primary, borderRadius: RADIUS.xl,
     marginHorizontal: SPACING.md, marginTop: SPACING.md,
-    padding: SPACING.md, borderWidth: 1, borderColor: COLORS.primary + '22', ...SHADOWS.small,
+    padding: SPACING.lg, ...SHADOWS.medium,
   },
   browseIcon: {
-    width: 40, height: 40, borderRadius: RADIUS.md, backgroundColor: COLORS.primary,
+    width: 56, height: 56, borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.accentUrgent,
     alignItems: 'center', justifyContent: 'center',
   },
-  browseTitle: { fontSize: 16, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
-  browseSub: { fontSize: 12.5, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 1 },
+  browseTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: '#fff' },
+  browseSub: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  browseCta: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 8 },
+  browseCtaText: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: '#fff' },
   sectionTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
   sectionSub: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
 

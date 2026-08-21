@@ -26,12 +26,20 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'dine_in', label: 'Dine-in' },
 ];
 
+const MENU_SORT = [
+  { key: '', label: 'Recommended' },
+  { key: 'price', label: 'Price: Low to High' },
+  { key: 'price_desc', label: 'Price: High to Low' },
+  { key: 'discount', label: 'Discount %' },
+];
+
 export default function RestaurantScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('surplus');
+  const [sortBy, setSortBy] = useState('');
   // Sub-type used when surplus is empty and we fall back to the regular menu
   const [fallbackType, setFallbackType] = useState<Exclude<Tab, 'surplus'>>('takeaway');
 
@@ -71,6 +79,19 @@ export default function RestaurantScreen() {
   const surplus = data.surplus_items || [];
   const menu = data.menu_items || [];
   const loc = vendor.location || {};
+
+  const priceOf = (it: any) => it.price ?? it.discounted_price ?? it.original_price ?? 0;
+  const discountOf = (it: any) => it.discount ?? it.discount_percentage ?? 0;
+  const sortItems = (items: any[]) => {
+    if (!sortBy) return items;
+    const arr = [...items];
+    if (sortBy === 'price') arr.sort((a, b) => priceOf(a) - priceOf(b));
+    else if (sortBy === 'price_desc') arr.sort((a, b) => priceOf(b) - priceOf(a));
+    else if (sortBy === 'discount') arr.sort((a, b) => discountOf(b) - discountOf(a));
+    return arr;
+  };
+  const sortedSurplus = sortItems(surplus);
+  const sortedMenu = sortItems(menu);
 
   const goToCheckout = (item: any, orderType: Tab) => {
     const isSurplus = orderType === 'surplus';
@@ -181,11 +202,30 @@ export default function RestaurantScreen() {
           })}
         </View>
 
+        {/* Sort bar */}
+        <View style={styles.sortBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortBarContent}>
+            {MENU_SORT.map((opt) => {
+              const active = sortBy === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key || 'default'}
+                  testID={`menu-sort-${opt.key || 'default'}`}
+                  style={[styles.sortChip, active && styles.sortChipActive]}
+                  onPress={() => setSortBy(opt.key)}
+                >
+                  <Text style={[styles.sortChipText, active && styles.sortChipTextActive]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
         {/* Content */}
         <View style={styles.content}>
           {tab === 'surplus' ? (
             surplus.length > 0 ? (
-              surplus.map((item: any) => (
+              sortedSurplus.map((item: any) => (
                 <MenuRow key={item.menu_item_id} item={item} surplus onPress={() => goToCheckout(item, 'surplus')} />
               ))
             ) : (
@@ -213,9 +253,7 @@ export default function RestaurantScreen() {
                 {menu.length === 0 ? (
                   <Text style={styles.emptyMenuText}>This restaurant hasn't added a menu yet.</Text>
                 ) : (
-                  menu.map((item: any) => (
-                    <MenuRow key={item.menu_item_id} item={item} onPress={() => goToCheckout(item, fallbackType)} />
-                  ))
+                  <GroupedMenu items={sortedMenu} flat={!!sortBy} onPressItem={(item: any) => goToCheckout(item, fallbackType)} />
                 )}
               </View>
             )
@@ -223,14 +261,49 @@ export default function RestaurantScreen() {
             menu.length === 0 ? (
               <Text style={styles.emptyMenuText}>This restaurant hasn't added a menu yet.</Text>
             ) : (
-              menu.map((item: any) => (
-                <MenuRow key={item.menu_item_id} item={item} onPress={() => goToCheckout(item, tab)} />
-              ))
+              <GroupedMenu items={sortedMenu} flat={!!sortBy} onPressItem={(item: any) => goToCheckout(item, tab)} />
             )
           )}
         </View>
       </ScrollView>
     </View>
+  );
+}
+
+function GroupedMenu({ items, onPressItem, flat }: { items: any[]; onPressItem: (item: any) => void; flat?: boolean }) {
+  // Group items by their free-form menu_category, preserving first-seen order.
+  // Items without a category fall into "More" shown last.
+  const order: string[] = [];
+  const groups: Record<string, any[]> = {};
+  items.forEach((it) => {
+    const key = (it.menu_category || '').trim() || '__uncategorized__';
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(it);
+  });
+  // If nothing is categorized, or a sort is active, render a flat list (no headers).
+  const hasCategories = order.some((k) => k !== '__uncategorized__');
+  if (flat || !hasCategories) {
+    return (
+      <>
+        {items.map((item) => (
+          <MenuRow key={item.menu_item_id} item={item} onPress={() => onPressItem(item)} />
+        ))}
+      </>
+    );
+  }
+  // Show uncategorized group last, labelled "More".
+  const sorted = [...order.filter((k) => k !== '__uncategorized__'), ...order.filter((k) => k === '__uncategorized__')];
+  return (
+    <>
+      {sorted.map((key) => (
+        <View key={key} style={styles.catGroup}>
+          <Text style={styles.catHeader}>{key === '__uncategorized__' ? 'More' : key}</Text>
+          {groups[key].map((item) => (
+            <MenuRow key={item.menu_item_id} item={item} onPress={() => onPressItem(item)} />
+          ))}
+        </View>
+      ))}
+    </>
   );
 }
 
@@ -243,11 +316,7 @@ function MenuRow({ item, surplus, onPress }: { item: any; surplus?: boolean; onP
       onPress={onPress}
       activeOpacity={0.85}
     >
-      {item.image_url ? (
-        <CachedImage uri={item.image_url} style={styles.rowImg} />
-      ) : (
-        <View style={[styles.rowImg, styles.rowImgEmpty]} />
-      )}
+      <CachedImage uri={item.image_url} style={styles.rowImg} />
       <View style={{ flex: 1 }}>
         <View style={styles.rowTitleLine}>
           <View style={[styles.vegDot, { borderColor: isVeg ? COLORS.success : COLORS.error }]}>
@@ -336,6 +405,15 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary },
   tabTextActive: { color: '#fff' },
   content: { padding: SPACING.md, gap: SPACING.sm },
+  sortBar: { backgroundColor: COLORS.surface, borderTopWidth: 1, borderTopColor: COLORS.borderLight },
+  sortBarContent: { paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm, gap: SPACING.sm },
+  sortChip: {
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs + 2,
+    borderRadius: RADIUS.full, backgroundColor: COLORS.borderLight, marginRight: SPACING.sm,
+  },
+  sortChipActive: { backgroundColor: COLORS.primary },
+  sortChipText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  sortChipTextActive: { color: '#fff' },
   emptySurplus: {
     alignItems: 'center', backgroundColor: COLORS.primary + '0D', borderRadius: RADIUS.lg,
     padding: SPACING.lg, marginBottom: SPACING.md, gap: 6,
@@ -348,6 +426,11 @@ const styles = StyleSheet.create({
   subSwitchText: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary },
   subSwitchTextActive: { color: '#fff' },
   emptyMenuText: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textAlign: 'center', paddingVertical: SPACING.xl },
+  catGroup: { gap: SPACING.sm, marginBottom: SPACING.sm },
+  catHeader: {
+    fontSize: 17, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary,
+    marginTop: SPACING.sm, marginBottom: 2,
+  },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.md, backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg, padding: SPACING.sm + 2, ...SHADOWS.small,

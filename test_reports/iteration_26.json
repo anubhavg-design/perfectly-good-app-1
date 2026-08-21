@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 26 — Menu Categories + Sorting + Home Browse-All-Deals card + VegDot + branded No-image placeholder. Backend pytest 12/12 PASS (/app/backend/tests/test_menu_category_and_sort.py). Verified: (1) POST /api/ops/vendors/{id}/menu and PUT /api/ops/menu/{id} persist free-form menu_category; GET /api/restaurants/{id} returns menu_category on every menu_items row (including empty string when not set). (2) GET /api/drops?sort_by=price|price_desc|discount correctly orders (price asc [30,100,240], desc [240,100,30], discount ranks 70%>50%>40%). (3) GET /api/browse-deals?sort_by=price|price_desc|discount|distance sorts correctly (price asc, price desc, discount non-increasing; distance param accepted). price_desc IS descending by price and price IS ascending — confirmed. (4) POST /api/ops/menu-import/parse-file maps both 'Menu Category' and 'Section' column headers into menu_category (via _normalize_menu_row aliases 'menu category','section','menu section','group'). Frontend E2E (Expo web, 390x844, real customer login): (A) /restaurant/vendor_e177d1bc3c50 — Takeaway tab shows FOUR category headers Mains/Starters/Drinks/Desserts with items grouped underneath when 'Recommended' is selected; tapping 'Price: Low to High' collapses to flat list sorted ascending [₹40, ₹80, ₹100, ₹120, ₹180] and headers vanish (verified via DOM query). (B) /browse-deals shows all 4 sort chips [sort-price, sort-price_desc, sort-discount, sort-distance] with 'Price: Low to High' green-highlighted by default. (C) /surplus shows the same 4 sort chips with 'Price: Low to High' green by default; single surplus card renders. (D) Home /(tabs)/home renders the redesigned Browse All Deals card — testID browse-all-deals, backgroundColor rgb(46,125,50) (COLORS.primary green), 'Browse All Deals' title + 'Discounted menu items from every restaurant near you' subtitle + 'Explore deals' CTA — tapping navigates to /browse-deals. (E) Veg toggle uses the green square+dot VegDot component (14px square with 1.68px green border + centered green dot) — no Leaf icon anywhere. (F) CachedImage branded placeholder renders the faded 'perfectly good' splash-icon.png on menu items with no image_url (visible on Draft Test Kitchen's items in restaurant screen). No React Native red screens, no deprecated packages, no SafeAreaView issues.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_menu_category_and_sort.py",
+    "/app/test_reports/pytest/iter26_menu_cat_sort.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py list_drops L677-689: still contains legacy _dist attach/pop path for distance sort even though every drop already has a persistent `distance` (L670-675). Not a bug, but dead code — sort key can just read d.get('distance') directly.",
+    "server.py browse_deals L1128-1129: distance sort treats missing distances as 99999 (pushes them last). Consistent with drops. When lat/lon are not provided, all rows have distance=None and end up at 99999 in a stable sort — acceptable fallback.",
+    "server.py _normalize_menu_row L4159: menu_category column aliases are 'menu category','section','menu section','group'. Good breadth. Note that 'section' alone is a very short common word — collision risk with unrelated columns is low but present. Consider tightening if false-positives appear.",
+    "server.py ops_add_menu_item L3406 and ops_update_menu_item L3426 strip menu_category; matches _menu_public L859 read-side stripping. Consistent.",
+    "server.py _menu_public L859 returns menu_category as empty string when unset — good, so frontend can rely on typeof === string.",
+    "frontend restaurant/[id].tsx GroupedMenu L273-308 gracefully handles all-uncategorized case by falling back to flat rendering (hasCategories flag). Correct.",
+    "frontend restaurant/[id].tsx sortItems is applied AFTER GroupedMenu receives items only when sortBy!==''; when sortBy==='' (Recommended) grouping is preserved. Matches spec: default Recommended keeps grouping; any price/discount sort flattens the list.",
+    "frontend browse-deals.tsx SORT_OPTIONS includes price/price_desc/discount/distance and default state price ('Price: Low to High'). Matches spec.",
+    "frontend surplus.tsx same 4 sort chips, default 'price'. Matches spec.",
+    "frontend home.tsx browseCard L433-450 has correct testID + green background + Tag icon + Explore-deals CTA. Card lives above Surplus Deals — matches redesign brief.",
+    "frontend VegDot.tsx L16-33 is a proper StyleSheet-inline square+dot component (no Leaf). Home + Browse + Surplus + Restaurant all import VegDot instead of the old lucide Leaf.",
+    "frontend CachedImage.tsx L26-33 renders a branded 'No image available' placeholder (faded splash-icon.png + optional label) when uri is empty — correct spec adherence."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_menu_category_and_sort.py (new — 12 pytest cases, all pass)"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 pytest pass on test_menu_category_and_sort.py)",
+    "frontend": "100% of requested flows verified (restaurant grouping+sort, browse-deals sort chips+default, surplus sort chips+default, Home Browse-All-Deals card+nav, VegDot square+dot symbol, branded no-image placeholder)"
+  },
+  "seed_data_creation": "Ephemeral: created ACTIVE vendor TEST_SortVendor_<uid> with discount_percentage=20 + 7 menu items (Starters/Mains/Drinks + 3 surplus items priced 100/200/400 with disc 30/100/240) via /api/ops/vendors + /api/ops/vendors/{id}/menu; DELETED in module fixture teardown. Registered one customer test_ui_1787324195@test.in / TestPass123! for the E2E flow (no PII, kept). No real Razorpay payment made.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Regression cmd: `export EXPO_PUBLIC_BACKEND_URL=https://perfectly-good-build.preview.emergentagent.com && python -m pytest /app/backend/tests/test_menu_category_and_sort.py -v`. When creating a vendor via /api/ops/vendors, the `hours` payload for each day must be a plain LIST of shift dicts (e.g. `{'mon': [{'start':'00:01','end':'23:59'}]}`) NOT `{'is_open': ..., 'shifts': [...]}` — the latter yields 400 Invalid shifts. For sorting E2E on browse-deals, at least one ACTIVE vendor with discount_percentage>0 AND a normal (non-surplus) menu item is required — DB currently has zero such vendors after teardown, so Browse Deals shows an empty state on the UI (backend sort is fully covered by pytest instead). Draft-status vendor vendor_e177d1bc3c50 is directly fetchable via /api/restaurants/{id} for the grouping/sort test even though it doesn't appear in /api/restaurants list.",
+  "rca_of_issue": "N/A — feature verification pass, no bugs found."
+}
