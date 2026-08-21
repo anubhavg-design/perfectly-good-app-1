@@ -151,6 +151,7 @@ export default function RootLayout() {
         <Stack.Screen name="support/[type]" />
         <Stack.Screen name="support/my-requests" />
         <Stack.Screen name="browse-deals" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="surplus" options={{ animation: 'slide_from_right' }} />
       </Stack>
     </AuthProvider>
   );

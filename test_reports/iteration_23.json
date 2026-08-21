@@ -1,0 +1,36 @@
+{
+  "summary": "Frontend-only review for Pricing + Price-based filtering (See all Surplus screen, price chips on /surplus and /browse-deals, price fallback rendering). All routes render without red-screens, testIDs are present and correctly wired, chip filtering interacts correctly, sort chips coexist with price chips on Browse Deals, and tapping a surplus card routes to /drop/{id}. Live data only had ONE surplus item (₹40 / orig ₹100) and ZERO browse-deals items (backend confirmed via /api/drops and /api/browse-deals), so I could not exercise a multi-price threshold cut nor a dp=null item on the live app — the chip logic was verified by code review. No red screens observed.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "home.tsx renderSurplusCard (discount badge)",
+        "issue": "Home Surplus horizontal card computes discount as getDiscount(item.original_price, item.discounted_price) and unconditionally renders the '<n>% OFF' badge. For a surplus item where discounted_price is null/undefined, JS coerces null → 0 and the badge would render as '100% OFF' even though backend sets price = original_price (i.e. no real discount). The price row itself is guarded correctly with the activePrice fallback (strike hidden when original_price is not greater than active price), so this is an inconsistency only in the badge. Reference: /app/frontend/app/(tabs)/home.tsx:117 and :128-130. Fix: gate the discount badge with `discount > 0` AND compute discount from activePrice = price ?? discounted_price ?? original_price (same pattern already used in /surplus surplus.tsx line 67/105).",
+        "testID": "surplus-card-*",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix home.tsx renderSurplusCard so the discount badge uses activePrice and only renders when discount > 0 (mirrors /app/frontend/app/surplus.tsx). Prevents a '100% OFF' badge for surplus items where discounted_price is null/0.",
+    "Seed at least one ACTIVE vendor with several surplus items at ₹40, ₹150, ₹280 AND one with discounted_price null/0 (as originally suggested) so the chip thresholds and the ₹0-fallback path can be UI-verified end-to-end. Currently only one surplus item (₹40) exists so 'Under ₹100/200/300' all trivially keep the same single item and there is no null-dp item on the app to visually verify."
+  ],
+  "critical_code_review_comments": [
+    "activePrice fallback: /app/frontend/app/surplus.tsx (line 23) and /app/frontend/app/restaurant/[id].tsx MenuRow surplus path (line 266-270) correctly use `price ?? discounted_price ?? original_price` and gate strike/% with a real comparison — good.",
+    "/app/frontend/app/browse-deals.tsx (line 174) filters via `(d.price ?? d.original_price) < priceMax`. Since Browse Deals items always carry a computed `price`, this is equivalent to activePrice for that feed — OK.",
+    "Route `/surplus` is registered in _layout.tsx (line 154) and the See all link (testID `see-all-surplus`) is added to home.tsx (line 397). Navigation confirmed to `/surplus` and card taps confirmed to `/drop/{item_id}`.",
+    "Both new chip rows use identical testIDs `price-0 / price-100 / price-200 / price-300` on /surplus and /browse-deals — matches spec. Sort chips on /browse-deals (`sort-price`, `sort-discount`, `sort-distance`) still render and still work alongside the new price row.",
+    "Minor: home.tsx renderSurplusCard discount computation inconsistency (see ui_bugs above)."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (frontend only per request)", "frontend": "95%" },
+  "seed_data_creation": "No seed data created. The DB already had one leftover TEST vendor with a single surplus item (menu_e854e3eb3bfa 'TEST Veg Croissant', original ₹100, price ₹40). Ops-vendor creation was not performed because the review scope is frontend-only and creating an ACTIVE vendor requires the full compliance/approval flow (draft → submit → admin approve) which is out of scope for a quick test pass — flagged in action_items for the main agent.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Only ONE live surplus item exists (₹40 with original ₹100). Browse Deals feed is empty. To fully exercise price chips (drop items out at various thresholds) and the dp=null → original-price fallback path, an ACTIVE multi-priced vendor must be seeded first (Ops admin: anubhavg@perfectlygood.in / Anubhavv → /ops → create vendor → set status active via admin approve → add surplus items ₹40, ₹150, ₹280, one with discounted_price null). Then rerun this test with the same testIDs (see-all-surplus, price-0/100/200/300, sort-price/discount/distance, surplus-item-<menuId>, browse-deal-<menuId>).",
+  "rca_of_issue": "N/A — no defect blocking release. The one nit (home surplus card % OFF badge) is documented under ui_bugs; it does not affect the /surplus See-all screen (which correctly gates the badge) nor the restaurant page MenuRow (which uses backend-computed item.discount guarded by > 0)."
+}

@@ -263,8 +263,10 @@ function MenuRow({ item, surplus, onPress }: { item: any; surplus?: boolean; onP
         <View style={styles.rowPriceLine}>
           {surplus ? (
             <>
-              <Text style={styles.rowPriceSurplus}>₹{item.discounted_price}</Text>
-              <Text style={styles.rowPriceStrike}>₹{item.original_price}</Text>
+              <Text style={styles.rowPriceSurplus}>₹{item.price ?? item.discounted_price ?? item.original_price}</Text>
+              {item.original_price > (item.price ?? item.discounted_price ?? item.original_price) ? (
+                <Text style={styles.rowPriceStrike}>₹{item.original_price}</Text>
+              ) : null}
               {item.discount > 0 ? <Text style={styles.rowDiscount}>{item.discount}% OFF</Text> : null}
             </>
           ) : (item.price != null && item.price < item.original_price) ? (

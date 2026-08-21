@@ -114,7 +114,8 @@ export default function HomeScreen() {
   }, [search, selectedCategory, lat, lon]);
 
   const renderSurplusCard = ({ item }: { item: any }) => {
-    const discount = getDiscount(item.original_price, item.discounted_price);
+    const activePrice = item.price ?? item.discounted_price ?? item.original_price;
+    const discount = getDiscount(item.original_price, activePrice);
     const timeLeft = getTimeRemaining(item.pickup_end_time);
     return (
       <TouchableOpacity
@@ -125,9 +126,11 @@ export default function HomeScreen() {
       >
         <View>
           <Image source={{ uri: item.image_url }} style={styles.surplusImage} />
-          <View style={styles.discountBadge}>
-            <Text style={styles.discountBadgeText}>{discount}% OFF</Text>
-          </View>
+          {discount > 0 ? (
+            <View style={styles.discountBadge}>
+              <Text style={styles.discountBadgeText}>{discount}% OFF</Text>
+            </View>
+          ) : null}
         </View>
         <View style={styles.surplusBody}>
           <Text style={styles.surplusName} numberOfLines={1}>{item.name}</Text>
@@ -143,8 +146,10 @@ export default function HomeScreen() {
             ) : null}
           </View>
           <View style={styles.surplusPriceRow}>
-            <Text style={styles.surplusPrice}>₹{item.discounted_price}</Text>
-            <Text style={styles.surplusStrike}>₹{item.original_price}</Text>
+            <Text style={styles.surplusPrice}>₹{item.price ?? item.discounted_price ?? item.original_price}</Text>
+            {item.original_price > (item.price ?? item.discounted_price ?? item.original_price) ? (
+              <Text style={styles.surplusStrike}>₹{item.original_price}</Text>
+            ) : null}
           </View>
           {timeLeft ? (
             <View style={styles.surplusTimer}>
@@ -387,9 +392,14 @@ export default function HomeScreen() {
 
       {/* Surplus Deals */}
       <View style={styles.sectionHead}>
-        <View style={styles.sectionTitleRow}>
-          <Sparkles size={18} color={COLORS.primary} />
-          <Text style={styles.sectionTitle}>Surplus Deals</Text>
+        <View style={styles.sectionHeadRow}>
+          <View style={styles.sectionTitleRow}>
+            <Sparkles size={18} color={COLORS.primary} />
+            <Text style={styles.sectionTitle}>Surplus Deals</Text>
+          </View>
+          <TouchableOpacity testID="see-all-surplus" onPress={() => router.push('/surplus')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={styles.seeAllText}>See all</Text>
+          </TouchableOpacity>
         </View>
         <Text style={styles.sectionSub}>Upto 70% off. Grab it before it&apos;s gone</Text>
       </View>
@@ -544,6 +554,8 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: SPACING.xxl },
 
   sectionHead: { paddingHorizontal: SPACING.md, marginTop: SPACING.md, marginBottom: SPACING.sm },
+  sectionHeadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  seeAllText: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   browseCard: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,

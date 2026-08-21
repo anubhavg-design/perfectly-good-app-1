@@ -19,12 +19,20 @@ const SORT_OPTIONS = [
   { key: 'distance', label: 'Nearest to Me' },
 ];
 
+const PRICE_FILTERS = [
+  { key: 0, label: 'All' },
+  { key: 100, label: 'Under ₹100' },
+  { key: 200, label: 'Under ₹200' },
+  { key: 300, label: 'Under ₹300' },
+];
+
 export default function BrowseDealsScreen() {
   const router = useRouter();
   const [deals, setDeals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sortBy, setSortBy] = useState('discount');
+  const [priceMax, setPriceMax] = useState(0);
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
 
@@ -138,6 +146,24 @@ export default function BrowseDealsScreen() {
         </ScrollView>
       </View>
 
+      <View style={styles.priceBarWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortBar}>
+          {PRICE_FILTERS.map((pf) => {
+            const active = priceMax === pf.key;
+            return (
+              <TouchableOpacity
+                key={pf.key}
+                testID={`price-${pf.key}`}
+                style={[styles.priceChip, active && styles.priceChipActive]}
+                onPress={() => setPriceMax(pf.key)}
+              >
+                <Text style={[styles.priceChipText, active && styles.priceChipTextActive]}>{pf.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
       {loading && !refreshing ? (
         <View style={styles.centerLoader}>
           <ActivityIndicator size="large" color={COLORS.primary} />
@@ -145,7 +171,7 @@ export default function BrowseDealsScreen() {
       ) : (
         <FlatList
           testID="browse-deals-list"
-          data={deals}
+          data={priceMax ? deals.filter((d) => (d.price ?? d.original_price) < priceMax) : deals}
           renderItem={renderDeal}
           keyExtractor={(item) => item.item_id}
           contentContainerStyle={styles.listContent}
@@ -182,6 +208,11 @@ const styles = StyleSheet.create({
   sortChipActive: { backgroundColor: COLORS.primary },
   sortChipText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
   sortChipTextActive: { color: '#fff' },
+  priceBarWrap: { borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
+  priceChip: { paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs + 2, borderRadius: RADIUS.full, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, marginRight: SPACING.sm },
+  priceChipActive: { backgroundColor: COLORS.primary + '15', borderColor: COLORS.primary },
+  priceChipText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  priceChipTextActive: { color: COLORS.primary, fontFamily: 'DMSans_700Bold' },
 
   centerLoader: { paddingVertical: 60, alignItems: 'center' },
   listContent: { padding: SPACING.md, gap: SPACING.md, paddingBottom: SPACING.xxl },

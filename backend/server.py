@@ -611,6 +611,12 @@ def item_to_drop(item: dict, vendor: Optional[dict]) -> dict:
     out = dict(item)
     out["item_id"] = item.get("menu_item_id")
     out["is_active"] = bool(item.get("available_today"))
+    # Active price with fallback to original (never ₹0 from a missing discount)
+    _op = out.get("original_price") or 0
+    _dp = out.get("discounted_price") or 0
+    out["price"] = _dp if (_dp and _dp > 0) else _op
+    if not (_dp and _dp > 0):
+        out["discounted_price"] = _op
     if vendor:
         out["vendor_name"] = vendor.get("name", "")
         out["vendor_location"] = vendor.get("location", {})
@@ -621,6 +627,10 @@ def item_to_drop(item: dict, vendor: Optional[dict]) -> dict:
         _ver = vendor.get("verification") or {}
         _agr = _ver.get("agreement") or {}
         out["vendor_verified"] = vendor.get("status") == "active" and bool(_agr.get("accepted")) and bool((_ver.get("fssai_number") or "").strip())
+        _st = _open_status(vendor)
+        out["is_open"] = _st["is_open"]
+        out["open_status_text"] = _st["status_text"]
+        out["today_shifts"] = _vendor_hours(vendor).get(DAYS[datetime.now(IST).weekday()], [])
     for k in ("created_at", "updated_at"):
         if k in out and hasattr(out[k], "isoformat"):
             out[k] = out[k].isoformat()
@@ -823,6 +833,8 @@ def _menu_public(m: dict, order_type: str, discount_pct: float = 0) -> dict:
     is_surplus = order_type == "surplus"
     disc = discount_pct or 0
     takeaway_price = round(op * (1 - disc / 100), 2) if op else 0
+    # Fallback: if no valid surplus/discounted price, charge the original price (never ₹0)
+    surplus_price = dp if (dp and dp > 0) else op
     out = {
         "menu_item_id": m.get("menu_item_id"),
         "item_id": m.get("menu_item_id"),
@@ -836,14 +848,14 @@ def _menu_public(m: dict, order_type: str, discount_pct: float = 0) -> dict:
         "kcal": m.get("kcal"),
         "protein": m.get("protein"),
         "original_price": op,
-        "price": dp if is_surplus else takeaway_price,
+        "price": surplus_price if is_surplus else takeaway_price,
         "available_today": bool(m.get("available_today")),
     }
     if is_surplus:
-        out["discounted_price"] = dp
+        out["discounted_price"] = surplus_price
         out["quantity_available"] = m.get("quantity_available")
         out["expiry"] = m.get("expiry", "")
-        out["discount"] = round(((op - dp) / op) * 100) if op else 0
+        out["discount"] = round(((op - surplus_price) / op) * 100) if op and surplus_price < op else 0
     else:
         out["discount_percentage"] = disc
     return out
@@ -1001,6 +1013,8 @@ async def featured_deals(lat: Optional[float] = None, lon: Optional[float] = Non
 
         op = chosen.get("original_price") or 0
         price = chosen.get("discounted_price") if chosen_is_surplus else round(op * (1 - chosen_disc / 100), 2)
+        if not price or price <= 0:
+            price = op
         pub = _vendor_public(v)
         loc = v.get("location", {}) or {}
         dist = None

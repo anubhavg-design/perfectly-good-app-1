@@ -68,9 +68,10 @@ export default function DropDetailScreen() {
     );
   }
 
-  const discount = getDiscount(drop.original_price, drop.discounted_price);
+  const activePrice = drop.price ?? drop.discounted_price ?? drop.original_price;
+  const discount = getDiscount(drop.original_price, activePrice);
   const timeLeft = getTimeRemaining(drop.pickup_end_time);
-  const savings = drop.original_price - drop.discounted_price;
+  const savings = drop.original_price - activePrice;
 
   return (
     <View style={styles.container}>
@@ -85,9 +86,11 @@ export default function DropDetailScreen() {
           </SafeAreaView>
           {/* Badges */}
           <View style={styles.badgeRow}>
-            <View style={styles.discountBadge}>
-              <Text style={styles.badgeText}>{discount}% OFF</Text>
-            </View>
+            {discount > 0 ? (
+              <View style={styles.discountBadge}>
+                <Text style={styles.badgeText}>{discount}% OFF</Text>
+              </View>
+            ) : null}
             {drop.quantity_available <= 5 && (
               <View style={styles.urgentBadge}>
                 <Text style={styles.badgeText}>{drop.quantity_available} left!</Text>
@@ -119,12 +122,16 @@ export default function DropDetailScreen() {
           {/* Pricing */}
           <View style={styles.priceCard}>
             <View style={styles.priceLeft}>
-              <Text style={styles.discountedPrice}>₹{drop.discounted_price}</Text>
-              <Text style={styles.originalPrice}>₹{drop.original_price}</Text>
+              <Text style={styles.discountedPrice}>₹{activePrice}</Text>
+              {drop.original_price > activePrice ? (
+                <Text style={styles.originalPrice}>₹{drop.original_price}</Text>
+              ) : null}
             </View>
-            <View style={styles.savingsChip}>
-              <Text style={styles.savingsText}>You save ₹{savings}</Text>
-            </View>
+            {savings > 0 ? (
+              <View style={styles.savingsChip}>
+                <Text style={styles.savingsText}>You save ₹{savings}</Text>
+              </View>
+            ) : null}
           </View>
 
           {/* Info rows */}
@@ -177,13 +184,13 @@ export default function DropDetailScreen() {
       <SafeAreaView edges={['bottom']} style={styles.bottomBar}>
         <View style={styles.bottomContent}>
           <View>
-            <Text style={styles.bottomPrice}>₹{drop.discounted_price}</Text>
+            <Text style={styles.bottomPrice}>₹{activePrice}</Text>
             <Text style={styles.bottomSub}>per item</Text>
           </View>
           <TouchableOpacity
             testID="reserve-btn"
             style={styles.reserveBtn}
-            onPress={() => router.push({ pathname: '/checkout', params: { itemId: drop.item_id, name: drop.name, price: drop.discounted_price, originalPrice: drop.original_price, vendorName: drop.vendor_name, maxQty: drop.quantity_available, imageUrl: drop.image_url } })}
+            onPress={() => router.push({ pathname: '/checkout', params: { itemId: drop.item_id, name: drop.name, price: String(drop.price ?? drop.discounted_price ?? drop.original_price), originalPrice: String(drop.original_price), vendorName: drop.vendor_name, maxQty: String(drop.quantity_available ?? 0), imageUrl: drop.image_url, orderType: 'surplus', isOpen: drop.is_open ? '1' : '0', openStatusText: drop.open_status_text || '', todayShifts: JSON.stringify(drop.today_shifts || []) } })}
             activeOpacity={0.8}
           >
             <Text style={styles.reserveBtnText}>Reserve Now</Text>

@@ -242,3 +242,9 @@
 - Tagline updated to "Upto 70% off. Grab it before it's gone".
 - Order again: backend GET /api/orders/{id}/reorder (owner-only) returns fresh checkout params (item price via order_type: surplus discounted_price / else vendor flat discount, vendorName, maxQty, isOpen, openStatusText, todayShifts). 400 if item/vendor unavailable or surplus sold out. Frontend orders.tsx: "Order again" button (RotateCcw, testID reorder-{id}) on ALL non-reserved orders → ordersApi.reorder → router.push('/checkout', params). Reserved orders keep Support/Cancel row.
 - Verified via script: has_veg/distance/category on all endpoints, distance-then-area sort (None last), reorder 200 with correct payload.
+
+## Price fallback + price chips (Aug 2026)
+- Price fallback (backend, never ₹0): _menu_public surplus_price = discounted_price if >0 else original_price (discount 0 + no strike when equal); item_to_drop adds `price` = discounted_price(>0) else original_price and sets discounted_price=original when missing; featured-deals price falls back to original if <=0. Verified for dp=None, dp=0, missing dp → shows original. Frontend surplus card + restaurant MenuRow use item.price ?? discounted_price ?? original_price and only strike original when original > active price.
+- New "See all surplus" screen app/surplus.tsx (route registered in _layout, slide_from_right): fetches /drops, price chips All/Under ₹100/₹200/₹300 (single-select, testID price-{key}), cards show category·km, price+strike+% off+qty, tap → /drop/{id}. Home Surplus Deals section header now has "See all" (testID see-all-surplus) → /surplus.
+- Browse Deals screen: added price chip row (All/Under ₹100/₹200/₹300, testID price-{key}) below the sort bar; filters deals by current active price (< threshold). Sort chips unchanged.
+- Filter semantics: "Under ₹N" => activePrice < N. activePrice = price ?? discounted_price ?? original_price.
