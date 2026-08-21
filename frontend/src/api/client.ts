@@ -196,7 +196,7 @@ export const dealAlertsApi = {
 
 // Restaurants endpoints (surplus + takeaway + dine-in)
 export const restaurantsApi = {
-  list: (params: { lat?: number; lon?: number; search?: string; category?: string }) => {
+  list: (params: { lat?: number; lon?: number; search?: string; category?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
       if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
@@ -216,7 +216,7 @@ export const restaurantsApi = {
     return apiFetch(`/featured-deals${qs ? `?${qs}` : ''}`);
   },
 
-  browseDeals: (params: { lat?: number; lon?: number; sort_by?: string }) => {
+  browseDeals: (params: { lat?: number; lon?: number; sort_by?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([k, v]) => {
       if (v !== undefined && v !== null && v !== '') query.append(k, String(v));

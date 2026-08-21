@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, Image, TouchableOpacity, StyleSheet,
+  View, Text, TouchableOpacity, StyleSheet,
   ScrollView, ActivityIndicator, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, MapPin, Clock, Tag, Leaf, ExternalLink, Sparkles, BadgeCheck } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { restaurantsApi } from '../../src/api/client';
+import CachedImage from '../../src/components/CachedImage';
 
 type Tab = 'surplus' | 'takeaway' | 'dine_in';
 
@@ -103,7 +104,7 @@ export default function RestaurantScreen() {
         {/* Hero / header */}
         <View style={styles.hero}>
           {vendor.storefront_image || vendor.logo_url ? (
-            <Image source={{ uri: vendor.storefront_image || vendor.logo_url }} style={styles.heroImage} />
+            <CachedImage uri={vendor.storefront_image || vendor.logo_url} style={styles.heroImage} />
           ) : (
             <View style={[styles.heroImage, styles.heroPlaceholder]}>
               <Text style={styles.heroInitial}>{(vendor.name || '?').charAt(0).toUpperCase()}</Text>
@@ -243,7 +244,7 @@ function MenuRow({ item, surplus, onPress }: { item: any; surplus?: boolean; onP
       activeOpacity={0.85}
     >
       {item.image_url ? (
-        <Image source={{ uri: item.image_url }} style={styles.rowImg} />
+        <CachedImage uri={item.image_url} style={styles.rowImg} />
       ) : (
         <View style={[styles.rowImg, styles.rowImgEmpty]} />
       )}

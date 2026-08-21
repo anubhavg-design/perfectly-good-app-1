@@ -9,11 +9,13 @@ import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRi
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
+import CachedImage from '../../src/components/CachedImage';
 import * as Location from 'expo-location';
 
 // Default: Bangalore
 const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
+const PAGE_SIZE = 12;
 
 function getTimeRemaining(endTime: string) {
   if (!endTime) return '';
@@ -42,6 +44,9 @@ export default function HomeScreen() {
   const [drops, setDrops] = useState<any[]>([]);
   const [restaurants, setRestaurants] = useState<any[]>([]);
   const [featured, setFeatured] = useState<any[]>([]);
+  const [rOffset, setROffset] = useState(0);
+  const [rHasMore, setRHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
@@ -90,20 +95,45 @@ export default function HomeScreen() {
   };
 
   const loadData = async () => {
+    setLoading(true);
+    // Restaurants — first page only (blocks the initial gate)
     try {
-      setLoading(true);
-      const [dropsRes, restRes, featRes] = await Promise.all([
-        dropsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined }),
-        restaurantsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined }),
-        restaurantsApi.featuredDeals({ lat, lon }),
-      ]);
-      setDrops(dropsRes || []);
-      setRestaurants(restRes || []);
-      setFeatured(featRes || []);
+      const restRes = await restaurantsApi.list({
+        lat, lon, search: search || undefined, category: selectedCategory || undefined,
+        limit: PAGE_SIZE, offset: 0,
+      });
+      const list = restRes || [];
+      setRestaurants(list);
+      setROffset(list.length);
+      setRHasMore(list.length === PAGE_SIZE);
     } catch (err) {
-      console.log('Failed to load home', err);
+      console.log('Failed to load restaurants', err);
     } finally {
       setLoading(false);
+    }
+    // Surplus + featured load in the background so a slow call never blocks the page
+    dropsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined })
+      .then((d) => setDrops(d || [])).catch(() => {});
+    restaurantsApi.featuredDeals({ lat, lon })
+      .then((f) => setFeatured(f || [])).catch(() => {});
+  };
+
+  const loadMoreRestaurants = async () => {
+    if (loadingMore || !rHasMore || loading) return;
+    setLoadingMore(true);
+    try {
+      const more = await restaurantsApi.list({
+        lat, lon, search: search || undefined, category: selectedCategory || undefined,
+        limit: PAGE_SIZE, offset: rOffset,
+      });
+      const list = more || [];
+      setRestaurants((prev) => [...prev, ...list]);
+      setROffset((prev) => prev + list.length);
+      setRHasMore(list.length === PAGE_SIZE);
+    } catch (err) {
+      console.log('Failed to load more restaurants', err);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -125,7 +155,7 @@ export default function HomeScreen() {
         activeOpacity={0.85}
       >
         <View>
-          <Image source={{ uri: item.image_url }} style={styles.surplusImage} />
+          <CachedImage uri={item.image_url} style={styles.surplusImage} />
           {discount > 0 ? (
             <View style={styles.discountBadge}>
               <Text style={styles.discountBadgeText}>{discount}% OFF</Text>
@@ -171,7 +201,7 @@ export default function HomeScreen() {
     >
       <View>
         {item.item_image ? (
-          <Image source={{ uri: item.item_image }} style={styles.featuredImage} />
+          <CachedImage uri={item.item_image} style={styles.featuredImage} />
         ) : (
           <View style={[styles.featuredImage, styles.featuredImagePlaceholder]}>
             <Store size={26} color={COLORS.textMuted} />
@@ -221,7 +251,7 @@ export default function HomeScreen() {
       activeOpacity={0.85}
     >
       {item.storefront_image || item.logo_url ? (
-        <Image source={{ uri: item.storefront_image || item.logo_url }} style={styles.restLogo} />
+        <CachedImage uri={item.storefront_image || item.logo_url} style={styles.restLogo} />
       ) : (
         <View style={[styles.restLogo, styles.restLogoPlaceholder]}>
           <Text style={styles.restLogoInitial}>{(item.name || '?').charAt(0).toUpperCase()}</Text>
@@ -478,10 +508,25 @@ export default function HomeScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
         }
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No restaurants found</Text>
-            <Text style={styles.emptySubtitle}>Try adjusting your search or filters.</Text>
-          </View>
+          loading ? null : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No restaurants found</Text>
+              <Text style={styles.emptySubtitle}>Try adjusting your search or filters.</Text>
+            </View>
+          )
+        }
+        onEndReached={loadMoreRestaurants}
+        onEndReachedThreshold={0.5}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.listFooter}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            </View>
+          ) : null
         }
       />
     </SafeAreaView>
@@ -490,6 +535,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
+  listFooter: { paddingVertical: SPACING.lg, alignItems: 'center' },
   surplusBanner: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: COLORS.primary + '12', marginHorizontal: SPACING.md, marginTop: SPACING.sm,

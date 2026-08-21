@@ -1,0 +1,37 @@
+{
+  "summary": "Performance audit (pagination + indexes + non-blocking + cached images) verified for Home and Browse Deals. Backend: 16/16 pytest cases pass (1 skipped due to <2 browse-deal items in DB). /restaurants and /browse-deals both accept limit/offset correctly (offset=0 vs offset=1 return different vendors; sort preserved; slicing matches full-list). All required MongoDB indexes exist on vendors(status), vendors(status,category), menu_items(vendor_id,available_today), menu_items(vendor_id,in_stock), menu_items(food_type), orders(vendor_id,status), orders(user_id,status). Backward compat: /restaurants and /browse-deals without limit still return full list. Frontend: on load, Home issues GET /api/restaurants?lat&lon&limit=12&offset=0 (paginated first page), and /api/drops + /api/featured-deals are fired separately (non-blocking) — the restaurant list renders even if those two are still in flight. Browse Deals issues GET /api/browse-deals?lat&lon&sort_by=discount&limit=15&offset=0. Images use expo-image via CachedImage (blurred placeholder + memory-disk cache). No red screens; no regressions observed (Home cards show category / km / Open-Closed; tap navigates; sort + price chips + veg toggle still render on Browse Deals; /surplus renders price chips). Infinite scroll onEndReached is wired correctly in code but could not be exercised end-to-end because DB has only 2 active vendors (< PAGE_SIZE=12) and 0 browse-deals items — hasMore correctly stays false, no unnecessary loadMore fires. This limit is explicitly acknowledged in the review request.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pagination_and_indexes.py",
+    "/app/test_reports/pytest/iter24_pagination.xml"
+  ],
+  "action_items": [
+    "OPTIONAL (only to visually verify infinite scroll): seed >12 ACTIVE vendors so Home onEndReached/loadMore + footer spinner can be observed in-app. Currently only 2 active vendors exist, so hasMore correctly stays false after the first page. API-level pagination is fully validated.",
+    "OPTIONAL: seed at least one vendor with discount_percentage>0 so /browse-deals returns items and infinite-scroll can be exercised end-to-end on that screen too. Today the feed is empty."
+  ],
+  "critical_code_review_comments": [
+    "Backend /restaurants (server.py:871-927) applies limit/offset correctly AFTER the distance/area sort, so page 1 = truly nearest. `if limit is None: return out[offset:]` preserves backward compatibility.",
+    "Backend /browse-deals (server.py:1059-1126) applies limit/offset AFTER sort. Same backward-compat pattern. OK.",
+    "Home loadData (home.tsx:97-119) awaits ONLY the restaurants first-page fetch to gate the initial spinner, then fires dropsApi.list and featuredDeals in fire-and-forget promises — matches the 'non-blocking background loading' requirement.",
+    "Home loadMoreRestaurants (home.tsx:121-138) is guarded by loadingMore / rHasMore / loading and wired to FlatList onEndReached with threshold 0.5 and a ListFooterComponent — correct pattern.",
+    "browse-deals.tsx uses PAGE_SIZE=15, hasMore = list.length === PAGE_SIZE, onEndReached wired at threshold 0.5. Sort chip changes reset offset and refetch first page — correct.",
+    "CachedImage.tsx wraps expo-image with cachePolicy='memory-disk', blurhash placeholder, transition=200, recyclingKey=uri — meets the 'progressive + cached + no full-res in list' requirement. expo-image downsamples to display size by default.",
+    "No 'expo-av' / 'expo-barcode-scanner' / 'expo-background-fetch' deprecated imports found in files_of_reference. No SafeAreaView regressions detected.",
+    "restaurantsApi.list / browseDeals in client.ts correctly propagate limit and offset in URLSearchParams (skipping undefined) — matches observed network calls in browser (?lat=..&lon=..&limit=12&offset=0 / limit=15&offset=0)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pagination_and_indexes.py (new)"
+  ],
+  "success_rate": { "backend": "100% (16/16 passed, 1 skipped due to seed data)", "frontend": "100% for what could be exercised (loadMore trigger blocked by <PAGE_SIZE items in DB)" },
+  "seed_data_creation": "No seed data created. DB has 2 active vendors and 1 surplus item — insufficient to visually trigger infinite scroll but sufficient (and expected) for API-level validation as noted by main agent.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To visually exercise onEndReached-triggered load-more on Home and Browse Deals, main agent must first seed >12 active vendors and >15 discounted menu items respectively. Until then, hasMore correctly stays false after the first page. Backend endpoints and all 7 new indexes are fully verified.",
+  "rca_of_issue": "N/A — no defect."
+}

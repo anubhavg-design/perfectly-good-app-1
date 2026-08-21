@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, Image, TouchableOpacity,
+  View, Text, StyleSheet, FlatList, TouchableOpacity,
   ActivityIndicator, RefreshControl, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,9 +9,11 @@ import { ArrowLeft, MapPin, BadgeCheck, Tag, Leaf } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { restaurantsApi } from '../src/api/client';
+import CachedImage from '../src/components/CachedImage';
 
 const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
+const PAGE_SIZE = 15;
 
 const SORT_OPTIONS = [
   { key: 'price', label: 'Price: Low to High' },
@@ -36,6 +38,9 @@ export default function BrowseDealsScreen() {
   const [vegOnly, setVegOnly] = useState(false);
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -53,14 +58,33 @@ export default function BrowseDealsScreen() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await restaurantsApi.browseDeals({ lat, lon, sort_by: sortBy });
-      setDeals(res || []);
+      const res = await restaurantsApi.browseDeals({ lat, lon, sort_by: sortBy, limit: PAGE_SIZE, offset: 0 });
+      const list = res || [];
+      setDeals(list);
+      setOffset(list.length);
+      setHasMore(list.length === PAGE_SIZE);
     } catch (err) {
       console.log('Failed to load browse deals', err);
     } finally {
       setLoading(false);
     }
   }, [lat, lon, sortBy]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || loading) return;
+    setLoadingMore(true);
+    try {
+      const res = await restaurantsApi.browseDeals({ lat, lon, sort_by: sortBy, limit: PAGE_SIZE, offset });
+      const list = res || [];
+      setDeals((prev) => [...prev, ...list]);
+      setOffset((prev) => prev + list.length);
+      setHasMore(list.length === PAGE_SIZE);
+    } catch (err) {
+      console.log('Failed to load more deals', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [lat, lon, sortBy, offset, hasMore, loadingMore, loading]);
 
   useEffect(() => {
     loadData();
@@ -80,7 +104,7 @@ export default function BrowseDealsScreen() {
       activeOpacity={0.85}
     >
       {item.item_image ? (
-        <Image source={{ uri: item.item_image }} style={styles.cardImage} />
+        <CachedImage uri={item.item_image} style={styles.cardImage} />
       ) : (
         <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
           <Tag size={22} color={COLORS.textMuted} />
@@ -199,6 +223,15 @@ export default function BrowseDealsScreen() {
               <Text style={styles.emptySubtitle}>Check back soon for discounted menu items.</Text>
             </View>
           }
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          removeClippedSubviews
+          ListFooterComponent={loadingMore ? (
+            <View style={styles.listFooter}><ActivityIndicator size="small" color={COLORS.primary} /></View>
+          ) : null}
         />
       )}
     </SafeAreaView>
@@ -233,6 +266,7 @@ const styles = StyleSheet.create({
   priceChipTextActive: { color: COLORS.primary, fontFamily: 'DMSans_700Bold' },
 
   centerLoader: { paddingVertical: 60, alignItems: 'center' },
+  listFooter: { paddingVertical: SPACING.lg, alignItems: 'center' },
   listContent: { padding: SPACING.md, gap: SPACING.md, paddingBottom: SPACING.xxl },
 
   card: {

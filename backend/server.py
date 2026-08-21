@@ -874,6 +874,8 @@ async def list_restaurants(
     lon: Optional[float] = None,
     search: Optional[str] = None,
     category: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
 ):
     query: dict = {"status": "active"}
     if category:
@@ -920,7 +922,9 @@ async def list_restaurants(
         r["distance"] if r["distance"] is not None else 99999,
         ((r.get("location") or {}).get("address") or "").lower(),
     ))
-    return out
+    if limit is not None:
+        return out[offset:offset + limit]
+    return out[offset:]
 
 @api.get("/restaurants/{vendor_id}")
 async def get_restaurant(vendor_id: str):
@@ -1057,6 +1061,8 @@ async def browse_deals(
     lat: Optional[float] = None,
     lon: Optional[float] = None,
     sort_by: Optional[str] = "discount",
+    limit: Optional[int] = None,
+    offset: int = 0,
 ):
     """All discounted NORMAL menu items (vendor flat discount applied) across
     active restaurants. Surplus listings (available_today) are excluded."""
@@ -1115,7 +1121,9 @@ async def browse_deals(
         results.sort(key=lambda r: r["distance"] if r["distance"] is not None else 99999)
     else:  # discount (default)
         results.sort(key=lambda r: (-(r["discount"] or 0), r["price"]))
-    return results
+    if limit is not None:
+        return results[offset:offset + limit]
+    return results[offset:]
 
 
 
@@ -4392,6 +4400,14 @@ async def seed_data():
     await db.drops.create_index("vendor_id")
     await db.menu_items.create_index("menu_item_id", unique=True)
     await db.menu_items.create_index("vendor_id")
+    # Perf indexes for home/browse queries
+    await db.vendors.create_index("status")
+    await db.vendors.create_index([("status", 1), ("category", 1)])
+    await db.menu_items.create_index([("vendor_id", 1), ("available_today", 1)])
+    await db.menu_items.create_index([("vendor_id", 1), ("in_stock", 1)])
+    await db.menu_items.create_index("food_type")
+    await db.orders.create_index([("vendor_id", 1), ("status", 1)])
+    await db.orders.create_index([("user_id", 1), ("status", 1)])
     await db.orders.create_index("order_id", unique=True)
     await db.orders.create_index("user_id")
     await db.orders.create_index("vendor_id")
