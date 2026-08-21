@@ -4,10 +4,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy, Sparkles, X, Settings } from 'lucide-react-native';
+import { User, Mail, Shield, LogOut, ChevronRight, Store, FileText, LifeBuoy, Sparkles, X, Settings, MessageCircle } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { useAuth } from '../../src/context/AuthContext';
 import GuestGate from '../../src/components/GuestGate';
+import { SUPPORT_WHATSAPP_NUMBER } from '../../src/constants/support';
 
 const VENDOR_CONTACT_EMAIL = 'chaitanya@perfectlygood.in';
 const STAFF_ROLES = ['admin', 'semi_admin', 'operations', 'customer_success', 'finance'];
@@ -46,6 +47,18 @@ export default function ProfileScreen() {
       setVendorModal(false);
     } catch {
       Alert.alert('Could not open email', `Please email us at ${VENDOR_CONTACT_EMAIL}.`);
+    }
+  };
+
+  const isVendor = user?.role === 'vendor' || user?.role === 'vendor_staff';
+
+  const openVendorWhatsapp = async () => {
+    const msg = `Hi Perfectly Good team, I'm a vendor and need some help.`;
+    const url = `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('WhatsApp not available', `Please message us on WhatsApp at +91 91128 75333.`);
     }
   };
 
@@ -166,15 +179,15 @@ export default function ProfileScreen() {
           <TouchableOpacity
             testID="help-support-btn"
             style={styles.actionCard}
-            onPress={() => router.push('/support')}
+            onPress={() => (isVendor ? openVendorWhatsapp() : router.push('/support'))}
             activeOpacity={0.8}
           >
-            <View style={[styles.actionIcon, { backgroundColor: '#EFF6FF' }]}>
-              <LifeBuoy size={20} color="#2563EB" />
+            <View style={[styles.actionIcon, { backgroundColor: isVendor ? '#E7F7EC' : '#EFF6FF' }]}>
+              {isVendor ? <MessageCircle size={20} color="#22A45D" /> : <LifeBuoy size={20} color="#2563EB" />}
             </View>
             <View style={styles.actionContent}>
               <Text style={styles.actionTitle}>Help & Support</Text>
-              <Text style={styles.actionSubtitle}>Report an issue with your order</Text>
+              <Text style={styles.actionSubtitle}>{isVendor ? 'Chat with us on WhatsApp' : 'Report an issue with your order'}</Text>
             </View>
             <ChevronRight size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -254,7 +267,7 @@ export default function ProfileScreen() {
                 <X size={22} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
-            <Text style={styles.modalSub}>Share a few details and we'll open your email to send them to our team.</Text>
+            <Text style={styles.modalSub}>Share a few details and we&apos;ll open your email to send them to our team.</Text>
 
             <Text style={styles.fieldLabel}>Owner Name</Text>
             <TextInput testID="vendor-owner-input" style={styles.input} value={vOwner} onChangeText={setVOwner}

@@ -248,3 +248,8 @@
 - New "See all surplus" screen app/surplus.tsx (route registered in _layout, slide_from_right): fetches /drops, price chips All/Under ₹100/₹200/₹300 (single-select, testID price-{key}), cards show category·km, price+strike+% off+qty, tap → /drop/{id}. Home Surplus Deals section header now has "See all" (testID see-all-surplus) → /surplus.
 - Browse Deals screen: added price chip row (All/Under ₹100/₹200/₹300, testID price-{key}) below the sort bar; filters deals by current active price (< threshold). Sort chips unchanged.
 - Filter semantics: "Under ₹N" => activePrice < N. activePrice = price ?? discounted_price ?? original_price.
+
+## Vendor add-surplus 2-step flow + WhatsApp support (Aug 2026)
+- vendor-create-drop.tsx now a 2-step wizard: Step 1 select ONE menu item + "Next" (testID next-step-btn, disabled until selected); Step 2 discounted price/quantity/expiry/pickup window + "Create Surplus Drop" (testID submit-drop-btn). Header title "Create Surplus Drop"; back on step 2 returns to step 1. Step indicator + selected-item summary added. Backend createDrop payload unchanged.
+- Support number changed to +91 91128 75333: src/constants/support.ts SUPPORT_WHATSAPP_NUMBER='919112875333' (used across customer support ticket WhatsApp links).
+- Vendor Help & Support: profile.tsx "Help & Support" action is now role-aware — for role vendor/vendor_staff it opens WhatsApp directly (wa.me/919112875333, MessageCircle icon, subtitle "Chat with us on WhatsApp") instead of the ticket flow; customers still go to /support.

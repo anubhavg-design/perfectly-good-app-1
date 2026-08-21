@@ -29,7 +29,7 @@ export const getIssueType = (key?: string) =>
   SUPPORT_ISSUE_TYPES.find((t) => t.key === key);
 
 // ── WhatsApp support (only used once an admin enables it on a ticket) ──
-export const SUPPORT_WHATSAPP_NUMBER = '919075295333'; // +91 90752 95333
+export const SUPPORT_WHATSAPP_NUMBER = '919112875333'; // +91 91128 75333
 export const SUPPORT_EMAIL = 'anubhavg@perfectlygood.in';
 
 const line = (label: string, value?: any) => (value != null && value !== '' ? `${label}: ${value}\n` : `${label}: -\n`);

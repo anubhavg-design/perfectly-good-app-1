@@ -30,6 +30,7 @@ export default function VendorCreateDropScreen() {
   const [pickupStart, setPickupStart] = useState('');
   const [pickupEnd, setPickupEnd] = useState('');
   const [creating, setCreating] = useState(false);
+  const [step, setStep] = useState(1);
 
   useEffect(() => {
     loadMenu();
@@ -44,6 +45,14 @@ export default function VendorCreateDropScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleNext = () => {
+    if (!selectedItem) {
+      Alert.alert('Select an item', 'Please choose one menu item to continue.');
+      return;
+    }
+    setStep(2);
   };
 
   const handleCreate = async () => {
@@ -66,7 +75,7 @@ export default function VendorCreateDropScreen() {
         pickup_end_time: pickupEnd,
         expiry,
       });
-      Alert.alert('Success', 'Drop created successfully!', [
+      Alert.alert('Success', 'Surplus drop created successfully!', [
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (err: any) {
@@ -87,54 +96,70 @@ export default function VendorCreateDropScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity testID="create-drop-back" onPress={() => router.back()} style={styles.headerBack}>
+        <TouchableOpacity
+          testID="create-drop-back"
+          onPress={() => (step === 2 ? setStep(1) : router.back())}
+          style={styles.headerBack}
+        >
           <ArrowLeft size={22} color={COLORS.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Create Drop</Text>
-        <TouchableOpacity
-          testID="submit-drop-btn"
-          onPress={handleCreate}
-          disabled={!selectedItem || creating}
-          style={[styles.headerAddBtn, (!selectedItem || creating) && { opacity: 0.4 }]}
-        >
-          {creating ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.headerAddText}>Add Drop</Text>}
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Create Surplus Drop</Text>
+        <View style={{ width: 40 }} />
       </View>
 
+      {/* Step indicator */}
+      <View style={styles.stepBar}>
+        <View style={[styles.stepDot, styles.stepDotActive]}>
+          <Text style={styles.stepDotText}>1</Text>
+        </View>
+        <View style={[styles.stepLine, step === 2 && styles.stepLineActive]} />
+        <View style={[styles.stepDot, step === 2 && styles.stepDotActive]}>
+          <Text style={[styles.stepDotText, step !== 2 && styles.stepDotTextInactive]}>2</Text>
+        </View>
+      </View>
+      <Text style={styles.stepLabel}>
+        {step === 1 ? 'Step 1 of 2 · Choose a menu item' : 'Step 2 of 2 · Set price, quantity & pickup'}
+      </Text>
+
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Select Menu Item */}
-        <Text style={styles.sectionTitle}>Select Menu Item</Text>
-        {menuItems.map((item) => (
-          <TouchableOpacity
-            key={item.menu_item_id}
-            testID={`menu-select-${item.menu_item_id}`}
-            style={[styles.menuCard, selectedItem?.menu_item_id === item.menu_item_id && styles.menuCardSelected]}
-            onPress={() => {
-              setSelectedItem(item);
-              // Default the discounted price to 80% of original (20% off)
-              setDiscountedPrice(String(Math.round(item.original_price * 0.8)));
-            }}
-          >
-            <View style={styles.menuInfo}>
-              <Text style={styles.menuName}>{item.name}</Text>
-              <Text style={styles.menuDesc} numberOfLines={1}>{item.description}</Text>
-              <Text style={styles.menuPrice}>₹{item.original_price}</Text>
-            </View>
-            {selectedItem?.menu_item_id === item.menu_item_id && (
-              <View style={styles.checkCircle}>
-                <Check size={16} color="#fff" />
+        {step === 1 ? (
+          <>
+            <Text style={styles.sectionTitle}>Select Menu Item</Text>
+            {menuItems.map((item) => (
+              <TouchableOpacity
+                key={item.menu_item_id}
+                testID={`menu-select-${item.menu_item_id}`}
+                style={[styles.menuCard, selectedItem?.menu_item_id === item.menu_item_id && styles.menuCardSelected]}
+                onPress={() => {
+                  setSelectedItem(item);
+                  // Default the discounted price to 80% of original (20% off)
+                  setDiscountedPrice(String(Math.round(item.original_price * 0.8)));
+                }}
+              >
+                <View style={styles.menuInfo}>
+                  <Text style={styles.menuName}>{item.name}</Text>
+                  <Text style={styles.menuDesc} numberOfLines={1}>{item.description}</Text>
+                  <Text style={styles.menuPrice}>₹{item.original_price}</Text>
+                </View>
+                {selectedItem?.menu_item_id === item.menu_item_id && (
+                  <View style={styles.checkCircle}>
+                    <Check size={16} color="#fff" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+            {menuItems.length === 0 && (
+              <Text style={styles.emptyText}>No menu items available. Ask admin to add items first.</Text>
+            )}
+          </>
+        ) : (
+          <View style={styles.detailsSection}>
+            {selectedItem && (
+              <View style={styles.selectedSummary}>
+                <Text style={styles.selectedSummaryName}>{selectedItem.name}</Text>
+                <Text style={styles.selectedSummaryPrice}>Original ₹{selectedItem.original_price}</Text>
               </View>
             )}
-          </TouchableOpacity>
-        ))}
-
-        {menuItems.length === 0 && (
-          <Text style={styles.emptyText}>No menu items available. Ask admin to add items first.</Text>
-        )}
-
-        {/* Drop Details */}
-        {selectedItem && (
-          <View style={styles.detailsSection}>
             <Text style={styles.sectionTitle}>Drop Details</Text>
 
             <View style={styles.inputGroup}>
@@ -148,7 +173,7 @@ export default function VendorCreateDropScreen() {
                 placeholder="e.g., 120"
                 placeholderTextColor={COLORS.textMuted}
               />
-              <Text style={styles.hint}>Original: ₹{selectedItem.original_price}</Text>
+              <Text style={styles.hint}>Original: ₹{selectedItem?.original_price}</Text>
             </View>
 
             <View style={styles.inputGroup}>
@@ -207,6 +232,28 @@ export default function VendorCreateDropScreen() {
           </View>
         )}
       </ScrollView>
+
+      <View style={styles.footer}>
+        {step === 1 ? (
+          <TouchableOpacity
+            testID="next-step-btn"
+            style={[styles.primaryBtn, !selectedItem && styles.primaryBtnDisabled]}
+            onPress={handleNext}
+            disabled={!selectedItem}
+          >
+            <Text style={styles.primaryBtnText}>Next</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            testID="submit-drop-btn"
+            style={[styles.primaryBtn, creating && styles.primaryBtnDisabled]}
+            onPress={handleCreate}
+            disabled={creating}
+          >
+            {creating ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.primaryBtnText}>Create Surplus Drop</Text>}
+          </TouchableOpacity>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
@@ -219,6 +266,21 @@ const styles = StyleSheet.create({
   headerAddBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.full, paddingHorizontal: SPACING.md, paddingVertical: 8, minWidth: 40, alignItems: 'center', justifyContent: 'center' },
   headerAddText: { color: '#fff', fontSize: 14, fontFamily: 'Outfit_600SemiBold' },
   headerTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
+  stepBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingTop: SPACING.sm, gap: 0 },
+  stepDot: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.borderLight, alignItems: 'center', justifyContent: 'center' },
+  stepDotActive: { backgroundColor: COLORS.primary },
+  stepDotText: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: '#fff' },
+  stepDotTextInactive: { color: COLORS.textMuted },
+  stepLine: { width: 48, height: 2, backgroundColor: COLORS.borderLight, marginHorizontal: 6 },
+  stepLineActive: { backgroundColor: COLORS.primary },
+  stepLabel: { fontSize: 12.5, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary, textAlign: 'center', marginTop: SPACING.xs },
+  selectedSummary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: COLORS.primary + '10', borderRadius: RADIUS.md, padding: SPACING.md, marginTop: SPACING.sm },
+  selectedSummaryName: { fontSize: 15, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, flexShrink: 1 },
+  selectedSummaryPrice: { fontSize: 13, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
+  footer: { padding: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.borderLight, backgroundColor: COLORS.background },
+  primaryBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 16, alignItems: 'center' },
+  primaryBtnDisabled: { opacity: 0.5 },
+  primaryBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Outfit_600SemiBold' },
   scrollContent: { padding: SPACING.md, paddingBottom: SPACING.xxl },
   sectionTitle: { fontSize: 15, fontFamily: 'DMSans_700Bold', color: COLORS.textSecondary, marginBottom: SPACING.sm, marginTop: SPACING.md, textTransform: 'uppercase', letterSpacing: 0.5 },
   menuCard: {
