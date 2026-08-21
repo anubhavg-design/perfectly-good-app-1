@@ -8,6 +8,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck, Tag } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../src/context/AuthContext';
 import CachedImage from '../../src/components/CachedImage';
 import VegDot from '../../src/components/VegDot';
@@ -19,6 +20,7 @@ import * as Location from 'expo-location';
 const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
 const PAGE_SIZE = 10;
+const HOME_CACHE_KEY = 'pg_home_restaurants_v1';
 
 function getTimeRemaining(endTime: string) {
   if (!endTime) return '';
@@ -47,8 +49,8 @@ const RestaurantCard = React.memo(function RestaurantCard({ item, onPress }: { i
       onPress={() => onPress(item.vendor_id)}
       activeOpacity={0.85}
     >
-      {item.storefront_image || item.logo_url ? (
-        <CachedImage uri={item.storefront_image || item.logo_url} style={styles.restLogo} />
+      {item.storefront_thumbnail || item.storefront_image || item.logo_url ? (
+        <CachedImage uri={item.storefront_thumbnail || item.storefront_image || item.logo_url} style={styles.restLogo} />
       ) : (
         <View style={[styles.restLogo, styles.restLogoPlaceholder]}>
           <Text style={styles.restLogoInitial}>{(item.name || '?').charAt(0).toUpperCase()}</Text>
@@ -118,6 +120,27 @@ export default function HomeScreen() {
   const [lon, setLon] = useState(DEFAULT_LON);
   const [tick, setTick] = useState(0);
   const [showSignInHint, setShowSignInHint] = useState(true);
+  const hasDataRef = useRef(false);
+
+  // Instant load: show the last cached restaurant list immediately on open,
+  // then loadData() fetches fresh in the background.
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(HOME_CACHE_KEY);
+        if (raw) {
+          const cached = JSON.parse(raw);
+          if (Array.isArray(cached) && cached.length && restaurants.length === 0) {
+            setRestaurants(cached);
+            setROffset(cached.length);
+            hasDataRef.current = true;
+            setLoading(false);
+          }
+        }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Live countdown: refresh the surplus "time left" labels each minute.
   useEffect(() => {
@@ -158,6 +181,9 @@ export default function HomeScreen() {
       setRestaurants(list);
       setROffset(list.length);
       setRHasMore(list.length === PAGE_SIZE);
+      if (!search && !selectedCategory) {
+        AsyncStorage.setItem(HOME_CACHE_KEY, JSON.stringify(list)).catch(() => {});
+      }
       dropsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined })
         .then((d) => setDrops(d || [])).catch(() => {});
       restaurantsApi.featuredDeals({ lat, lon })
@@ -183,7 +209,8 @@ export default function HomeScreen() {
   };
 
   const loadData = async () => {
-    setLoading(true);
+    const isDefaultView = !search && !selectedCategory;
+    if (!hasDataRef.current) setLoading(true);
     // Restaurants — first page only (blocks the initial gate)
     try {
       const restRes = await restaurantsApi.list({
@@ -194,6 +221,10 @@ export default function HomeScreen() {
       setRestaurants(list);
       setROffset(list.length);
       setRHasMore(list.length === PAGE_SIZE);
+      hasDataRef.current = true;
+      if (isDefaultView) {
+        AsyncStorage.setItem(HOME_CACHE_KEY, JSON.stringify(list)).catch(() => {});
+      }
     } catch (err) {
       console.log('Failed to load restaurants', err);
     } finally {

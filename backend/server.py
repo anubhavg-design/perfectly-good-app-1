@@ -254,6 +254,19 @@ def haversine(lat1, lon1, lat2, lon2):
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     return R * 2 * math.asin(math.sqrt(a))
 
+def _geo_point(loc: dict):
+    """GeoJSON Point {type, coordinates:[lon,lat]} from a {lat,lon} location, or None."""
+    if not isinstance(loc, dict):
+        return None
+    lat, lon = loc.get("lat"), loc.get("lon")
+    try:
+        lat = float(lat); lon = float(lon)
+    except (TypeError, ValueError):
+        return None
+    if lat == 0 and lon == 0:
+        return None
+    return {"type": "Point", "coordinates": [lon, lat]}
+
 def resolve_place_id(place_id: str) -> dict:
     """Kept for backwards compat — not used when no Google API key."""
     return {}
@@ -820,6 +833,7 @@ def _vendor_public(v: dict) -> dict:
         "location": v.get("location", {}),
         "logo_url": v.get("logo_url", ""),
         "storefront_image": v.get("storefront_image", ""),
+        "storefront_thumbnail": v.get("storefront_thumbnail", "") or v.get("storefront_image", ""),
         "discount_percentage": v.get("discount_percentage", 0) or 0,
         "pickup_start_time": v.get("pickup_start_time", ""),
         "pickup_end_time": v.get("pickup_end_time", ""),
@@ -831,6 +845,25 @@ def _vendor_public(v: dict) -> dict:
         # Verified = admin-approved (active) AND has completed compliance (FSSAI + accepted agreement).
         "verified": v.get("status") == "active" and bool(agreement.get("accepted")) and bool((ver.get("fssai_number") or "").strip()),
     }
+
+def _vendor_card(v: dict) -> dict:
+    """Slim shape for the home LIST — only the fields the restaurant card renders.
+    Full details (hours, shifts, address, full-res image) come from /restaurants/{id}."""
+    ver = v.get("verification") or {}
+    agreement = ver.get("agreement") or {}
+    st = _open_status(v)
+    return {
+        "vendor_id": v.get("vendor_id"),
+        "name": v.get("name", ""),
+        "category": v.get("category", ""),
+        "storefront_thumbnail": v.get("storefront_thumbnail", "") or v.get("storefront_image", ""),
+        "logo_url": v.get("logo_url", ""),
+        "discount_percentage": v.get("discount_percentage", 0) or 0,
+        "is_open": st["is_open"],
+        "verified": v.get("status") == "active" and bool(agreement.get("accepted")) and bool((ver.get("fssai_number") or "").strip()),
+    }
+
+
 
 async def _ops_name_map() -> dict:
     """Map operations staff user_id -> display name (for vendor assignment)."""
@@ -887,7 +920,33 @@ async def list_restaurants(
         query["category"] = category
     if search:
         query["name"] = {"$regex": search, "$options": "i"}
-    vendors = await db.vendors.find(query, {"_id": 0}).to_list(500)
+
+    # Nearest-first using the 2dsphere index when we have the user's location.
+    dist_by_vendor: dict = {}
+    vendors: list = []
+    if lat is not None and lon is not None:
+        try:
+            geo_pipeline = [
+                {"$geoNear": {
+                    "near": {"type": "Point", "coordinates": [lon, lat]},
+                    "distanceField": "_dist_m",
+                    "spherical": True,
+                    "key": "location_geo",
+                    "query": query,
+                }},
+                {"$project": {"_id": 0}},
+            ]
+            vendors = await db.vendors.aggregate(geo_pipeline).to_list(500)
+            dist_by_vendor = {v["vendor_id"]: round(v["_dist_m"] / 1000, 1) for v in vendors}
+            # Include active vendors without a geo point (never geocoded) at the end.
+            have = set(dist_by_vendor.keys())
+            extras = await db.vendors.find({**query, "vendor_id": {"$nin": list(have)}}, {"_id": 0}).to_list(500)
+            vendors += extras
+        except Exception as e:
+            logger.warning(f"$geoNear failed, using haversine fallback: {e}")
+            vendors = []
+    if not vendors:
+        vendors = await db.vendors.find(query, {"_id": 0}).to_list(500)
     vendor_ids = [v["vendor_id"] for v in vendors]
 
     counts: dict = {}
@@ -910,23 +969,23 @@ async def list_restaurants(
 
     out = []
     for v in vendors:
-        pub = _vendor_public(v)
+        pub = _vendor_card(v)
         c = counts.get(v["vendor_id"], {})
         pub["menu_count"] = c.get("menu_count", 0)
         pub["surplus_count"] = c.get("surplus_count", 0)
         pub["has_veg"] = c.get("veg_count", 0) > 0
         loc = v.get("location", {}) or {}
-        if lat is not None and lon is not None and loc.get("lat") and loc.get("lon"):
+        if v["vendor_id"] in dist_by_vendor:
+            pub["distance"] = dist_by_vendor[v["vendor_id"]]
+        elif lat is not None and lon is not None and loc.get("lat") and loc.get("lon"):
             pub["distance"] = round(haversine(lat, lon, loc["lat"], loc["lon"]), 1)
         else:
             pub["distance"] = None
         out.append(pub)
 
-    # Nearest first, then by area (locality/address) alphabetically
-    out.sort(key=lambda r: (
-        r["distance"] if r["distance"] is not None else 99999,
-        ((r.get("location") or {}).get("address") or "").lower(),
-    ))
+    # $geoNear already returns nearest-first; only sort when we didn't use it.
+    if not dist_by_vendor:
+        out.sort(key=lambda r: (r["distance"] if r["distance"] is not None else 99999, (r.get("name") or "").lower()))
     if limit is not None:
         return out[offset:offset + limit]
     return out[offset:]
@@ -1211,6 +1270,7 @@ async def create_order(body: CreateOrderBody, request: Request):
             "unit_price": round(unit_price, 2),
             "image_url": item.get("thumbnail_url") or item.get("image_url", ""),
             "line_subtotal": round(unit_price * qty, 2),
+            "note": (str(ri.get("note") or "")).strip()[:200],
         })
 
     # Vendor must be Active (admin-approved) to receive orders.
@@ -1326,6 +1386,7 @@ async def _finalize_order(pending: dict, razorpay_payment_id: str = "") -> Optio
             "unit_price": unit_price_legacy,
             "image_url": item.get("thumbnail_url") or item.get("image_url", ""),
             "line_subtotal": round(unit_price_legacy * legacy_qty, 2),
+            "note": "",
         }]
 
     total_qty = sum(i.get("quantity", 1) for i in pending_items)
@@ -1934,6 +1995,7 @@ async def update_vendor_profile(body: UpdateVendorProfileBody, request: Request)
             updates["location"] = location
         else:
             updates["location"] = {"lat": 0, "lon": 0, "address": body.address, "maps_url": f"https://www.google.com/maps/search/?api=1&query={body.address.replace(' ', '+')}"}
+        updates["location_geo"] = _geo_point(updates["location"])
     if updates:
         await db.vendors.update_one({"vendor_id": vendor["vendor_id"]}, {"$set": updates})
     updated = await db.vendors.find_one({"vendor_id": vendor["vendor_id"]}, {"_id": 0})
@@ -2793,16 +2855,18 @@ async def ops_create_vendor(body: OpsVendorBody, request: Request):
     now = datetime.now(timezone.utc)
     # Operations staff can only create vendors assigned to themselves; admin assigns freely.
     assigned = user["user_id"] if user.get("role") == "operations" else (body.assigned_ops or "")
+    _sf_full, _sf_thumb = await _store_image_variants(body.storefront_image or "", f"vendor/{vendor_id}")
     vendor_doc = {
         "vendor_id": vendor_id, "user_id": user_id, "name": body.name,
         "owner_name": body.owner_name or "", "category": body.category, "email": email,
         "phone": body.phone or "", "restaurant_phone": body.restaurant_phone or "",
         "full_address": body.full_address or "", "maps_link": body.maps_link or "",
-        "location": location, "logo_url": "", "service_type": body.service_type or "both",
+        "location": location, "location_geo": _geo_point(location),
+        "logo_url": "", "service_type": body.service_type or "both",
         "pickup_start_time": body.pickup_start_time or "18:00", "pickup_end_time": body.pickup_end_time or "21:00",
         "status": body.status or "draft", "assigned_ops": assigned,
         "discount_percentage": max(0.0, min(float(body.discount_percentage or 0), 90.0)),
-        "storefront_image": (await _store_image_variants(body.storefront_image or "", f"vendor/{vendor_id}"))[0],
+        "storefront_image": _sf_full, "storefront_thumbnail": _sf_thumb,
         "notes": [], "created_at": now, "updated_at": now, "last_order_date": None,
     }
     if body.hours is not None:
@@ -2864,6 +2928,7 @@ async def ops_update_vendor(vendor_id: str, body: OpsVendorBody, request: Reques
         raise HTTPException(status_code=404, detail="Vendor not found")
     if user.get("role") == "operations" and v.get("assigned_ops") != user["user_id"]:
         raise HTTPException(status_code=403, detail="This vendor is not assigned to you")
+    _sf_full, _sf_thumb = await _store_image_variants(body.storefront_image or "", f"vendor/{vendor_id}")
     updates = {
         "name": body.name, "owner_name": body.owner_name or "", "category": body.category,
         "phone": body.phone or "", "restaurant_phone": body.restaurant_phone or "",
@@ -2871,7 +2936,7 @@ async def ops_update_vendor(vendor_id: str, body: OpsVendorBody, request: Reques
         "service_type": body.service_type or "both", "pickup_start_time": body.pickup_start_time or "18:00",
         "pickup_end_time": body.pickup_end_time or "21:00", "status": body.status or "active",
         "discount_percentage": max(0.0, min(float(body.discount_percentage or 0), 90.0)),
-        "storefront_image": (await _store_image_variants(body.storefront_image or "", f"vendor/{vendor_id}"))[0],
+        "storefront_image": _sf_full, "storefront_thumbnail": _sf_thumb,
         "updated_at": datetime.now(timezone.utc),
     }
     if body.hours is not None:
@@ -2885,6 +2950,7 @@ async def ops_update_vendor(vendor_id: str, body: OpsVendorBody, request: Reques
             if body.maps_link:
                 loc["maps_url"] = body.maps_link
             updates["location"] = loc
+            updates["location_geo"] = _geo_point(loc)
     await db.vendors.update_one({"vendor_id": vendor_id}, {"$set": updates})
     if body.name or body.phone:
         await db.users.update_one({"user_id": v.get("user_id")}, {"$set": {"name": body.name, "phone": body.phone or ""}})
@@ -4596,6 +4662,11 @@ async def seed_data():
     await db.vendors.create_index("status")
     await db.vendors.create_index("category")
     await db.vendors.create_index([("status", 1), ("category", 1)])
+    await db.vendors.create_index([("location_geo", "2dsphere")])
+    # Backfill GeoJSON points for existing vendors so $geoNear can use the index.
+    async for _v in db.vendors.find({"location_geo": {"$exists": False}}, {"_id": 0, "vendor_id": 1, "location": 1}):
+        gp = _geo_point(_v.get("location") or {})
+        await db.vendors.update_one({"vendor_id": _v["vendor_id"]}, {"$set": {"location_geo": gp}})
     await db.menu_items.create_index("available_today")
     await db.menu_items.create_index([("vendor_id", 1), ("available_today", 1)])
     await db.menu_items.create_index([("available_today", 1), ("in_stock", 1)])

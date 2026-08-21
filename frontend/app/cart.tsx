@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Minus, Plus, Trash2, ShoppingBag } from 'lucide-react-native';
@@ -9,7 +9,7 @@ import { useCart, orderTypeLabel } from '../src/context/CartContext';
 
 export default function CartScreen() {
   const router = useRouter();
-  const { cart, itemCount, subtotal, updateQty, removeItem, clearCart } = useCart();
+  const { cart, itemCount, subtotal, updateQty, updateNote, removeItem, clearCart } = useCart();
 
   if (!cart || itemCount === 0) {
     return (
@@ -81,6 +81,15 @@ export default function CartScreen() {
                   <Trash2 size={18} color={COLORS.accentUrgent} />
                 </TouchableOpacity>
               </View>
+              <TextInput
+                testID={`cart-note-${it.itemId}`}
+                style={styles.noteInput}
+                value={it.note || ''}
+                onChangeText={(v) => updateNote(it.itemId, v)}
+                placeholder="Add a note (e.g. no onions)"
+                placeholderTextColor={COLORS.textMuted}
+                maxLength={200}
+              />
             </View>
             <Text style={styles.lineTotal}>₹{Math.round(it.price * it.quantity * 100) / 100}</Text>
           </View>
@@ -126,6 +135,7 @@ const styles = StyleSheet.create({
   stepBtnDisabled: { backgroundColor: COLORS.borderLight },
   qtyVal: { fontSize: 16, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary, minWidth: 24, textAlign: 'center' },
   lineTotal: { fontSize: 15, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary, alignSelf: 'center' },
+  noteInput: { borderWidth: 1, borderColor: COLORS.borderLight, borderRadius: RADIUS.sm, paddingHorizontal: SPACING.sm, paddingVertical: 7, fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textPrimary, marginTop: 8 },
   summaryCard: { backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, padding: SPACING.md, marginTop: SPACING.sm, ...SHADOWS.small },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   summaryLabel: { fontSize: 15, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },

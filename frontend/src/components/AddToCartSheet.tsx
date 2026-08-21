@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput } from 'react-native';
 import { X, Minus, Plus } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS } from '../constants/theme';
 import CachedImage from './CachedImage';
@@ -21,9 +21,10 @@ type Props = {
 export default function AddToCartSheet({ visible, onClose, meta, foodType }: Props) {
   const { addItem, replaceWithItem } = useCart();
   const [qty, setQty] = useState(1);
+  const [note, setNote] = useState('');
   const [conflict, setConflict] = useState<{ vendorName: string; sameVendor: boolean } | null>(null);
 
-  React.useEffect(() => { if (visible) { setQty(1); setConflict(null); } }, [visible, meta?.item?.itemId]);
+  React.useEffect(() => { if (visible) { setQty(1); setNote(''); setConflict(null); } }, [visible, meta?.item?.itemId]);
 
   if (!meta) return null;
   const item = meta.item;
@@ -31,7 +32,7 @@ export default function AddToCartSheet({ visible, onClose, meta, foodType }: Pro
   const isVeg = (foodType || 'veg') !== 'non_veg';
 
   const doAdd = () => {
-    const res = addItem({ ...meta, quantity: qty });
+    const res = addItem({ ...meta, item: { ...meta.item, note: note.trim() }, quantity: qty });
     if (res.ok) {
       onClose();
       return;
@@ -40,7 +41,7 @@ export default function AddToCartSheet({ visible, onClose, meta, foodType }: Pro
     setConflict({ vendorName: res.vendorName, sameVendor: res.sameVendor });
   };
 
-  const confirmReplace = () => { replaceWithItem({ ...meta, quantity: qty }); setConflict(null); onClose(); };
+  const confirmReplace = () => { replaceWithItem({ ...meta, item: { ...meta.item, note: note.trim() }, quantity: qty }); setConflict(null); onClose(); };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -112,6 +113,16 @@ export default function AddToCartSheet({ visible, onClose, meta, foodType }: Pro
             <Text style={styles.maxHint}>Max available: {item.maxQty}</Text>
           ) : null}
 
+          <TextInput
+            testID="add-cart-note"
+            style={styles.noteInput}
+            value={note}
+            onChangeText={setNote}
+            placeholder="Add a note (e.g. no onions)"
+            placeholderTextColor={COLORS.textMuted}
+            maxLength={200}
+          />
+
           <TouchableOpacity testID="add-cart-confirm" style={styles.addBtn} onPress={doAdd} activeOpacity={0.85}>
             <Text style={styles.addBtnText}>Add to Cart · ₹{Math.round(item.price * qty * 100) / 100}</Text>
           </TouchableOpacity>
@@ -144,6 +155,7 @@ const styles = StyleSheet.create({
   stepBtnDisabled: { backgroundColor: COLORS.borderLight },
   qtyVal: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary, minWidth: 32, textAlign: 'center' },
   maxHint: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, marginBottom: SPACING.sm },
+  noteInput: { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.md, paddingHorizontal: SPACING.md, paddingVertical: 10, fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textPrimary, marginTop: SPACING.xs },
   addBtn: { backgroundColor: COLORS.primary, borderRadius: RADIUS.md, paddingVertical: 15, alignItems: 'center', marginTop: SPACING.md },
   addBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Outfit_700Bold' },
   confirmWrap: { paddingTop: SPACING.sm },

@@ -61,7 +61,7 @@ export default function CheckoutScreen() {
     setLoading(true);
     try {
       const orderData = await ordersApi.create({
-        items: cart.items.map((i) => ({ food_item_id: i.itemId, quantity: i.quantity })),
+        items: cart.items.map((i) => ({ food_item_id: i.itemId, quantity: i.quantity, note: (i.note || '').trim() })),
         order_type: orderType,
         shift_start: chosenShift?.start,
         shift_end: chosenShift?.end,
@@ -257,6 +257,7 @@ export default function CheckoutScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.lineName} numberOfLines={1}>{it.name}</Text>
                   <Text style={styles.lineMeta}>{it.quantity} × ₹{it.price}</Text>
+                  {it.note ? <Text style={styles.lineNote} numberOfLines={2}>Note: {it.note}</Text> : null}
                 </View>
                 <Text style={styles.lineTotal}>₹{money(round2(it.price * it.quantity))}</Text>
               </View>
@@ -355,6 +356,7 @@ const styles = StyleSheet.create({
   lineImg: { width: 48, height: 48, borderRadius: RADIUS.sm, backgroundColor: COLORS.skeleton },
   lineName: { fontSize: 15, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
   lineMeta: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
+  lineNote: { fontSize: 12.5, fontFamily: 'DMSans_500Medium', color: COLORS.primary, marginTop: 2 },
   lineTotal: { fontSize: 15, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },
   maxQtyHint: { fontSize: 12, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, marginTop: SPACING.xs },
   slotRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },

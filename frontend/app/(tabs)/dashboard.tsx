@@ -43,7 +43,7 @@ interface VendorDrop {
 interface VendorOrder {
   order_id: string;
   food_item_name: string;
-  items?: { food_item_name: string; quantity: number }[];
+  items?: { food_item_name: string; quantity: number; note?: string }[];
   customer_name: string;
   quantity: number;
   total_amount: number;
@@ -375,9 +375,12 @@ export default function DashboardScreen() {
         <View style={styles.cardRow}>
           <View style={styles.cardInfo}>
             <Text style={styles.cardTitle} numberOfLines={1}>{item.food_item_name}</Text>
-            {item.items && item.items.length > 1 ? (
+            {item.items && item.items.length > 0 ? (
               item.items.map((li, i) => (
-                <Text key={i} style={styles.cardSub} numberOfLines={1}>· {li.quantity} × {li.food_item_name}</Text>
+                <View key={i}>
+                  <Text style={styles.cardSub} numberOfLines={1}>· {li.quantity} × {li.food_item_name}</Text>
+                  {li.note ? <Text style={styles.cardNote} numberOfLines={2}>   ↳ {li.note}</Text> : null}
+                </View>
               ))
             ) : null}
             <Text style={styles.cardSub}>{item.customer_name} · Qty: {item.quantity}</Text>
@@ -964,6 +967,7 @@ const styles = StyleSheet.create({
   cardInfo: { flex: 1 },
   cardTitle: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
   cardSub: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
+  cardNote: { fontSize: 12.5, fontFamily: 'DMSans_500Medium', color: COLORS.primary, marginTop: 1 },
   actionRow: { flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.borderLight, paddingTop: SPACING.sm },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: SPACING.sm, borderRadius: RADIUS.md },
   actionBtnText: { color: '#fff', fontSize: 13, fontFamily: 'DMSans_700Bold' },

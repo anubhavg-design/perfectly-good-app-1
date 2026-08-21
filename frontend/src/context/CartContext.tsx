@@ -9,6 +9,7 @@ export type CartItem = {
   imageUrl: string;
   maxQty: number; // 0 = unlimited (takeaway/dine-in)
   quantity: number;
+  note?: string;
 };
 
 export type Cart = {
@@ -41,6 +42,7 @@ type CartContextType = {
   addItem: (meta: AddMeta) => AddResult;
   replaceWithItem: (meta: AddMeta) => void;
   updateQty: (itemId: string, quantity: number) => void;
+  updateNote: (itemId: string, note: string) => void;
   removeItem: (itemId: string) => void;
   clearCart: () => void;
 };
@@ -104,7 +106,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         const items = [...prev.items];
         const idx = items.findIndex((i) => i.itemId === meta.item.itemId);
         if (idx >= 0) {
-          items[idx] = clampQty({ ...items[idx], quantity: items[idx].quantity + qty });
+          items[idx] = clampQty({ ...items[idx], quantity: items[idx].quantity + qty, note: meta.item.note ?? items[idx].note });
         } else {
           items.push(clampQty({ ...meta.item, quantity: qty }));
         }
@@ -138,13 +140,20 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const updateNote = (itemId: string, note: string) => {
+    setCart((prev) => {
+      if (!prev) return prev;
+      return { ...prev, items: prev.items.map((i) => (i.itemId === itemId ? { ...i, note } : i)) };
+    });
+  };
+
   const clearCart = () => setCart(null);
 
   const itemCount = cart ? cart.items.reduce((s, i) => s + i.quantity, 0) : 0;
   const subtotal = cart ? Math.round(cart.items.reduce((s, i) => s + i.price * i.quantity, 0) * 100) / 100 : 0;
 
   return (
-    <CartContext.Provider value={{ cart, itemCount, subtotal, addItem, replaceWithItem, updateQty, removeItem, clearCart }}>
+    <CartContext.Provider value={{ cart, itemCount, subtotal, addItem, replaceWithItem, updateQty, updateNote, removeItem, clearCart }}>
       {children}
     </CartContext.Provider>
   );
