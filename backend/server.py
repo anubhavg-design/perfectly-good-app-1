@@ -798,6 +798,118 @@ async def get_restaurant(vendor_id: str):
         "menu_items": menu_items,
     }
 
+@api.get("/featured-deals")
+async def featured_deals(lat: Optional[float] = None, lon: Optional[float] = None):
+    """One 'featured deal' per active restaurant (only restaurants that have at
+    least one qualifying discounted item).
+      - If the restaurant has bestselling items (any item ordered >= 3 times),
+        pick the bestseller with the highest % discount.
+      - Otherwise (few/no orders), pick the most discounted normal menu item.
+    Discount % = surplus % for live surplus items, else the vendor's flat menu discount."""
+    from collections import defaultdict
+
+    active_vendors = await db.vendors.find({"status": "active"}, {"_id": 0}).to_list(500)
+    if not active_vendors:
+        return []
+    vendor_ids = [v["vendor_id"] for v in active_vendors]
+
+    # Bestselling counts from completed (picked_up) orders
+    completed = await db.orders.find(
+        {"vendor_id": {"$in": vendor_ids}, "status": "picked_up"},
+        {"_id": 0, "vendor_id": 1, "food_item_id": 1, "quantity": 1},
+    ).to_list(100000)
+    qty_by_item = defaultdict(int)
+    for o in completed:
+        qty_by_item[(o.get("vendor_id"), o.get("food_item_id"))] += o.get("quantity", 1)
+
+    menu = await db.menu_items.find({"vendor_id": {"$in": vendor_ids}}, {"_id": 0}).to_list(100000)
+    items_by_vendor = defaultdict(list)
+    for m in menu:
+        if m.get("in_stock", True) is not False:
+            items_by_vendor[m.get("vendor_id")].append(m)
+
+    def item_discount(m: dict, vendor_disc: float):
+        """Return (discount_pct, is_surplus) for a menu item."""
+        op = m.get("original_price") or 0
+        if op <= 0:
+            return 0, False
+        dp = m.get("discounted_price") or 0
+        is_surplus = bool(m.get("available_today")) and dp > 0 and dp < op
+        if is_surplus:
+            return round(((op - dp) / op) * 100), True
+        return round(vendor_disc), False
+
+    results = []
+    for v in active_vendors:
+        vid = v["vendor_id"]
+        vendor_disc = v.get("discount_percentage") or 0
+        vmenu = items_by_vendor.get(vid, [])
+        if not vmenu:
+            continue
+
+        chosen = None
+        chosen_disc = 0
+        chosen_is_surplus = False
+        reason = ""
+
+        bestsellers = [m for m in vmenu if qty_by_item.get((vid, m.get("menu_item_id")), 0) >= 3]
+        if bestsellers:
+            scored = []
+            for m in bestsellers:
+                disc, is_s = item_discount(m, vendor_disc)
+                scored.append((disc, m.get("original_price") or 0, m, is_s))
+            scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            disc, _op, m, is_s = scored[0]
+            if disc > 0:
+                chosen, chosen_disc, chosen_is_surplus, reason = m, disc, is_s, "Bestseller"
+
+        if chosen is None:
+            # Fallback: most discounted normal (non-surplus) menu item
+            scored = []
+            for m in vmenu:
+                disc, is_s = item_discount(m, vendor_disc)
+                if is_s:
+                    continue
+                scored.append((disc, m.get("original_price") or 0, m))
+            scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            if scored and scored[0][0] > 0:
+                disc, _op, m = scored[0]
+                chosen, chosen_disc, chosen_is_surplus, reason = m, disc, False, "Top deal"
+
+        if chosen is None:
+            continue
+
+        op = chosen.get("original_price") or 0
+        price = chosen.get("discounted_price") if chosen_is_surplus else round(op * (1 - chosen_disc / 100), 2)
+        pub = _vendor_public(v)
+        loc = v.get("location", {}) or {}
+        dist = None
+        if lat is not None and lon is not None and loc.get("lat") and loc.get("lon"):
+            dist = round(haversine(lat, lon, loc["lat"], loc["lon"]), 1)
+
+        results.append({
+            "vendor_id": vid,
+            "vendor_name": v.get("name", ""),
+            "storefront_image": v.get("storefront_image", ""),
+            "logo_url": v.get("logo_url", ""),
+            "verified": pub.get("verified", False),
+            "distance": dist,
+            "reason": reason,
+            "item_id": chosen.get("menu_item_id"),
+            "item_name": chosen.get("name", ""),
+            "item_image": chosen.get("image_url", ""),
+            "food_type": chosen.get("food_type", "veg"),
+            "original_price": op,
+            "price": price,
+            "discount": chosen_disc,
+            "is_surplus": chosen_is_surplus,
+        })
+
+    # Highest discount first, then nearest
+    results.sort(key=lambda r: (-(r["discount"] or 0), r["distance"] if r["distance"] is not None else 99999))
+    return results
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  ORDERS
 # ══════════════════════════════════════════════════════════════════════════
@@ -1520,12 +1632,12 @@ async def create_vendor_drop(body: CreateDropBody, request: Request):
     if vendor.get("status") != "active":
         raise HTTPException(status_code=403, detail="Your account must be approved before you can list surplus deals.")
 
-    # Surplus listings must be at least 30% off the regular menu (dine-in) price
+    # Surplus listings must be at least 20% off the regular menu (dine-in) price
     op = menu_item.get("original_price") or 0
-    if op > 0 and body.discounted_price > round(op * 0.7, 2):
+    if op > 0 and body.discounted_price > round(op * 0.8, 2):
         raise HTTPException(
             status_code=400,
-            detail=f"Surplus price must be at least 30% off the menu price of ₹{op:.0f} (₹{round(op * 0.7):.0f} or less).",
+            detail=f"Surplus price must be at least 20% off the menu price of ₹{op:.0f} (₹{round(op * 0.8):.0f} or less).",
         )
 
     updates = {

@@ -207,3 +207,13 @@
 - Frontend: src/utils/notifications.ts uses getDevicePushTokenAsync → POST /register-push; AuthContext registers on login/app-open with user_id. app/_layout.tsx has module-scope setNotificationHandler + 'default' Android channel, useEffect with addNotificationResponseReceivedListener + getLastNotificationResponseAsync (deeplink/action_url routing) + weekly denied-permission Alert nudge to Linking.openSettings().
 - app.json: android.googleServicesFile = ./google-services.json (user to add file). expo-notifications plugin already present.
 - CAVEAT: Push only works on native iOS/Android builds after Publish/Deploy/Build (not Expo Go / web). Placeholder key returns 401→500 in preview, which is expected.
+
+## Surplus min discount + Featured Deals (Aug 2026)
+- Surplus minimum discount lowered from 30% → 20% (enforced in POST /api/vendor/drops: discounted_price must be ≤ original*0.8; error message updated). Only surplus-creation flow with a min-discount check. Frontend vendor-create-drop.tsx auto-suggest prefill changed from 40% off (×0.6) → 20% off (×0.8).
+- New GET /api/featured-deals?lat&lon: one 'featured deal' per ACTIVE restaurant, only restaurants with ≥1 qualifying discounted item.
+  - Bestselling path: any item with ≥3 completed (picked_up) orders → pick bestseller with highest % discount.
+  - Fallback (few/no orders): most discounted NORMAL (non-surplus) menu item (by %, tiebreak highest original_price).
+  - Discount % = surplus % (op vs discounted_price for live available_today items) else vendor flat discount_percentage. Item must be in_stock. Vendor excluded if chosen discount == 0. Sorted by discount desc, then distance.
+  - Response includes vendor + item fields + reason ("Bestseller"/"Top deal") + is_surplus. Tap → restaurant page.
+  - Validated with seeded data: bestseller-with-highest-discount and top-deal fallback both correct.
+- Home screen (app/(tabs)/home.tsx): new "Featured Deals" horizontal section rendered immediately AFTER "Surplus Deals" and before "Nearby Restaurants". Hidden when empty or in surplus-only focus view. API: restaurantsApi.featuredDeals in src/api/client.ts.

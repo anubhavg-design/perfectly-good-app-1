@@ -206,6 +206,15 @@ export const restaurantsApi = {
   },
 
   get: (vendorId: string) => apiFetch(`/restaurants/${vendorId}`),
+
+  featuredDeals: (params: { lat?: number; lon?: number }) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') query.append(k, String(v));
+    });
+    const qs = query.toString();
+    return apiFetch(`/featured-deals${qs ? `?${qs}` : ''}`);
+  },
 };
 
 // Orders endpoints

@@ -41,6 +41,7 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const [drops, setDrops] = useState<any[]>([]);
   const [restaurants, setRestaurants] = useState<any[]>([]);
+  const [featured, setFeatured] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
@@ -90,12 +91,14 @@ export default function HomeScreen() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [dropsRes, restRes] = await Promise.all([
+      const [dropsRes, restRes, featRes] = await Promise.all([
         dropsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined }),
         restaurantsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined }),
+        restaurantsApi.featuredDeals({ lat, lon }),
       ]);
       setDrops(dropsRes || []);
       setRestaurants(restRes || []);
+      setFeatured(featRes || []);
     } catch (err) {
       console.log('Failed to load home', err);
     } finally {
@@ -142,6 +145,47 @@ export default function HomeScreen() {
       </TouchableOpacity>
     );
   };
+
+  const renderFeaturedCard = ({ item }: { item: any }) => (
+    <TouchableOpacity
+      testID={`featured-card-${item.vendor_id}`}
+      style={styles.featuredCard}
+      onPress={() => router.push(`/restaurant/${item.vendor_id}`)}
+      activeOpacity={0.85}
+    >
+      <View>
+        {item.item_image ? (
+          <Image source={{ uri: item.item_image }} style={styles.featuredImage} />
+        ) : (
+          <View style={[styles.featuredImage, styles.featuredImagePlaceholder]}>
+            <Store size={26} color={COLORS.textMuted} />
+          </View>
+        )}
+        <View style={styles.featuredReasonPill}>
+          <Sparkles size={11} color="#fff" />
+          <Text style={styles.featuredReasonText}>{item.reason}</Text>
+        </View>
+        {item.discount > 0 ? (
+          <View style={styles.discountBadge}>
+            <Text style={styles.discountBadgeText}>{item.discount}% OFF</Text>
+          </View>
+        ) : null}
+      </View>
+      <View style={styles.surplusBody}>
+        <Text style={styles.surplusName} numberOfLines={1}>{item.item_name}</Text>
+        <View style={styles.featuredVendorRow}>
+          <Text style={styles.surplusVendor} numberOfLines={1}>{item.vendor_name}</Text>
+          {item.verified ? <BadgeCheck size={12} color={COLORS.primary} /> : null}
+        </View>
+        <View style={styles.surplusPriceRow}>
+          <Text style={styles.surplusPrice}>₹{item.price}</Text>
+          {item.discount > 0 ? (
+            <Text style={styles.surplusStrike}>₹{item.original_price}</Text>
+          ) : null}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
 
   const renderRestaurant = ({ item }: { item: any }) => (
     <TouchableOpacity
@@ -307,6 +351,28 @@ export default function HomeScreen() {
         />
       )}
 
+      {/* Featured Deals */}
+      {!surplusOnly && featured.length > 0 ? (
+        <>
+          <View style={styles.sectionHead}>
+            <View style={styles.sectionTitleRow}>
+              <Sparkles size={18} color={COLORS.accentUrgent} />
+              <Text style={styles.sectionTitle}>Featured Deals</Text>
+            </View>
+            <Text style={styles.sectionSub}>One standout pick from each restaurant</Text>
+          </View>
+          <FlatList
+            testID="featured-list"
+            data={featured}
+            renderItem={renderFeaturedCard}
+            keyExtractor={(item) => `feat-${item.vendor_id}`}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.surplusListContent}
+          />
+        </>
+      ) : null}
+
       {/* Nearby Restaurants heading */}
       <View style={styles.sectionHead}>
         <View style={styles.sectionTitleRow}>
@@ -433,6 +499,21 @@ const styles = StyleSheet.create({
   surplusStrike: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textMuted, textDecorationLine: 'line-through' },
   surplusTimer: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   surplusTimerText: { fontSize: 11.5, fontFamily: 'DMSans_700Bold', color: COLORS.accentUrgent },
+
+  featuredCard: {
+    width: 190, backgroundColor: COLORS.surface, borderRadius: RADIUS.lg, overflow: 'hidden',
+    borderWidth: 1, borderColor: COLORS.accentUrgent + '30', ...SHADOWS.small,
+  },
+  featuredImage: { width: '100%', height: 110, backgroundColor: COLORS.skeleton },
+  featuredImagePlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  featuredReasonPill: {
+    position: 'absolute', top: SPACING.sm, right: SPACING.sm,
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: COLORS.accentUrgent, borderRadius: RADIUS.full,
+    paddingHorizontal: SPACING.sm, paddingVertical: 3,
+  },
+  featuredReasonText: { color: '#fff', fontSize: 10.5, fontFamily: 'DMSans_700Bold' },
+  featuredVendorRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
 
   restCard: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.md,

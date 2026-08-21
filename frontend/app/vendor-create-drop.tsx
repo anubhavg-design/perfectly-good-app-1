@@ -111,8 +111,8 @@ export default function VendorCreateDropScreen() {
             style={[styles.menuCard, selectedItem?.menu_item_id === item.menu_item_id && styles.menuCardSelected]}
             onPress={() => {
               setSelectedItem(item);
-              // Default the discounted price to 60% of original
-              setDiscountedPrice(String(Math.round(item.original_price * 0.6)));
+              // Default the discounted price to 80% of original (20% off)
+              setDiscountedPrice(String(Math.round(item.original_price * 0.8)));
             }}
           >
             <View style={styles.menuInfo}>
