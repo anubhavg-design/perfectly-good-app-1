@@ -41,6 +41,7 @@ export default function OrdersScreen() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [reorderingId, setReorderingId] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (user?.role === 'vendor') router.replace('/(tabs)/dashboard');
@@ -68,6 +69,33 @@ export default function OrdersScreen() {
     setRefreshing(true);
     await loadOrders();
     setRefreshing(false);
+  };
+
+  const handleReorder = async (orderId: string) => {
+    setReorderingId(orderId);
+    try {
+      const d = await ordersApi.reorder(orderId);
+      router.push({
+        pathname: '/checkout',
+        params: {
+          itemId: d.itemId,
+          name: d.name,
+          price: String(d.price),
+          originalPrice: String(d.originalPrice),
+          vendorName: d.vendorName,
+          maxQty: String(d.maxQty ?? 0),
+          imageUrl: d.imageUrl || '',
+          orderType: d.orderType,
+          isOpen: d.isOpen ? '1' : '0',
+          openStatusText: d.openStatusText || '',
+          todayShifts: JSON.stringify(d.todayShifts || []),
+        },
+      });
+    } catch (err: any) {
+      Alert.alert('Cannot reorder', err.message || 'This item is no longer available.');
+    } finally {
+      setReorderingId(null);
+    }
   };
 
   const handleCancel = (orderId: string, itemName: string) => {
@@ -168,6 +196,25 @@ export default function OrdersScreen() {
             </TouchableOpacity>
           </View>
         )}
+
+        {!isReserved && (
+          <TouchableOpacity
+            testID={`reorder-${item.order_id}`}
+            style={styles.reorderBtn}
+            onPress={() => handleReorder(item.order_id)}
+            disabled={reorderingId === item.order_id}
+            activeOpacity={0.8}
+          >
+            {reorderingId === item.order_id ? (
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            ) : (
+              <>
+                <RotateCcw size={15} color={COLORS.primary} />
+                <Text style={styles.reorderBtnText}>Order again</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
@@ -256,6 +303,12 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginTop: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.borderLight, paddingTop: SPACING.xs },
   supportBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, flex: 1, paddingVertical: SPACING.sm },
   supportBtnText: { fontSize: 14, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
+  reorderBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    marginTop: SPACING.sm, paddingVertical: SPACING.sm + 2, borderRadius: RADIUS.md,
+    borderWidth: 1, borderColor: COLORS.primary, backgroundColor: COLORS.primary + '0D',
+  },
+  reorderBtnText: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
   codeBox: {
     marginTop: SPACING.sm, backgroundColor: COLORS.primary + '0D', borderWidth: 1, borderColor: COLORS.primary + '33',
     borderRadius: RADIUS.md, padding: SPACING.md, alignItems: 'center',

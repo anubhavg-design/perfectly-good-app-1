@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck, Tag } from 'lucide-react-native';
+import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck, Tag, Leaf } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
 import { useAuth } from '../../src/context/AuthContext';
@@ -45,6 +45,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
+  const [vegOnly, setVegOnly] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('');
@@ -131,6 +132,16 @@ export default function HomeScreen() {
         <View style={styles.surplusBody}>
           <Text style={styles.surplusName} numberOfLines={1}>{item.name}</Text>
           <Text style={styles.surplusVendor} numberOfLines={1}>{item.vendor_name}</Text>
+          <View style={styles.cardMetaRow}>
+            {item.vendor_category ? <Text style={styles.cardMetaText}>{item.vendor_category}</Text> : null}
+            {item.vendor_category && item.distance != null ? <Text style={styles.cardMetaDot}>·</Text> : null}
+            {item.distance != null ? (
+              <View style={styles.cardMetaDist}>
+                <MapPin size={10} color={COLORS.textMuted} />
+                <Text style={styles.cardMetaText}>{item.distance} km</Text>
+              </View>
+            ) : null}
+          </View>
           <View style={styles.surplusPriceRow}>
             <Text style={styles.surplusPrice}>₹{item.discounted_price}</Text>
             <Text style={styles.surplusStrike}>₹{item.original_price}</Text>
@@ -176,6 +187,16 @@ export default function HomeScreen() {
         <View style={styles.featuredVendorRow}>
           <Text style={styles.surplusVendor} numberOfLines={1}>{item.vendor_name}</Text>
           {item.verified ? <BadgeCheck size={12} color={COLORS.primary} /> : null}
+        </View>
+        <View style={styles.cardMetaRow}>
+          {item.vendor_category ? <Text style={styles.cardMetaText}>{item.vendor_category}</Text> : null}
+          {item.vendor_category && item.distance != null ? <Text style={styles.cardMetaDot}>·</Text> : null}
+          {item.distance != null ? (
+            <View style={styles.cardMetaDist}>
+              <MapPin size={10} color={COLORS.textMuted} />
+              <Text style={styles.cardMetaText}>{item.distance} km</Text>
+            </View>
+          ) : null}
         </View>
         <View style={styles.surplusPriceRow}>
           <Text style={styles.surplusPrice}>₹{item.price}</Text>
@@ -241,6 +262,11 @@ export default function HomeScreen() {
     </TouchableOpacity>
   );
 
+  const isVeg = (ft: string) => ft !== 'non_veg';
+  const vegDrops = vegOnly ? drops.filter((d: any) => isVeg(d.food_type)) : drops;
+  const vegFeatured = vegOnly ? featured.filter((f: any) => isVeg(f.food_type)) : featured;
+  const vegRestaurants = vegOnly ? restaurants.filter((r: any) => r.has_veg) : restaurants;
+
   const ListHeader = (
     <View>
       {!user && showSignInHint ? (
@@ -270,12 +296,23 @@ export default function HomeScreen() {
       ) : null}
       {/* Header */}
       <View style={styles.headerSection}>
+        <View style={{ width: 40 }} />
         <Image
           source={require('../../assets/images/splash-icon.png')}
           style={styles.headerLogo}
           resizeMode="contain"
           accessibilityLabel="Perfectly Good"
         />
+        <TouchableOpacity
+          testID="veg-only-toggle"
+          style={[styles.vegToggle, vegOnly && styles.vegToggleActive]}
+          onPress={() => setVegOnly((v) => !v)}
+          activeOpacity={0.8}
+          accessibilityLabel="Veg only filter"
+        >
+          <Leaf size={14} color={vegOnly ? '#fff' : COLORS.success} />
+          <Text style={[styles.vegToggleText, vegOnly && styles.vegToggleTextActive]}>Veg</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Search */}
@@ -354,16 +391,16 @@ export default function HomeScreen() {
           <Sparkles size={18} color={COLORS.primary} />
           <Text style={styles.sectionTitle}>Surplus Deals</Text>
         </View>
-        <Text style={styles.sectionSub}>Up to 70% off — rescue before it&apos;s gone</Text>
+        <Text style={styles.sectionSub}>Upto 70% off. Grab it before it&apos;s gone</Text>
       </View>
-      {drops.length === 0 ? (
+      {vegDrops.length === 0 ? (
         <View style={styles.surplusEmpty}>
           <Text style={styles.surplusEmptyText}>No surplus deals right now. Check back soon!</Text>
         </View>
       ) : (
         <FlatList
           testID="surplus-list"
-          data={drops}
+          data={vegDrops}
           extraData={tick}
           renderItem={renderSurplusCard}
           keyExtractor={(item) => item.item_id}
@@ -374,7 +411,7 @@ export default function HomeScreen() {
       )}
 
       {/* Featured Deals */}
-      {!surplusOnly && featured.length > 0 ? (
+      {!surplusOnly && vegFeatured.length > 0 ? (
         <>
           <View style={styles.sectionHead}>
             <View style={styles.sectionTitleRow}>
@@ -385,7 +422,7 @@ export default function HomeScreen() {
           </View>
           <FlatList
             testID="featured-list"
-            data={featured}
+            data={vegFeatured}
             renderItem={renderFeaturedCard}
             keyExtractor={(item) => `feat-${item.vendor_id}`}
             horizontal
@@ -421,7 +458,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
         testID="restaurants-list"
-        data={surplusOnly ? restaurants.filter((r) => (r.surplus_count || 0) > 0) : restaurants}
+        data={surplusOnly ? vegRestaurants.filter((r) => (r.surplus_count || 0) > 0) : vegRestaurants}
         renderItem={renderRestaurant}
         keyExtractor={(item) => item.vendor_id}
         ListHeaderComponent={ListHeader}
@@ -458,8 +495,20 @@ const styles = StyleSheet.create({
   signInHintTextWrap: { flex: 1 },
   signInHintText: { fontSize: 13, fontFamily: 'DMSans_500Medium', color: COLORS.textSecondary },
   signInHintCta: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: COLORS.primary, marginRight: 4 },
-  headerSection: { paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm, alignItems: 'center' },
+  headerSection: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm },
   headerLogo: { width: 180, height: 56 },
+  vegToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderRadius: RADIUS.full, paddingHorizontal: SPACING.sm + 2, paddingVertical: 6,
+    borderWidth: 1, borderColor: COLORS.success, backgroundColor: COLORS.surface,
+  },
+  vegToggleActive: { backgroundColor: COLORS.success, borderColor: COLORS.success },
+  vegToggleText: { fontSize: 12.5, fontFamily: 'DMSans_700Bold', color: COLORS.success },
+  vegToggleTextActive: { color: '#fff' },
+  cardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  cardMetaDist: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  cardMetaText: { fontSize: 11, fontFamily: 'DMSans_500Medium', color: COLORS.textMuted },
+  cardMetaDot: { fontSize: 11, color: COLORS.textMuted },
   greeting: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: COLORS.primary },
   subGreeting: { fontSize: 14, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 2 },
   searchRow: { flexDirection: 'row', paddingHorizontal: SPACING.md, marginBottom: SPACING.sm, gap: SPACING.sm },
@@ -557,9 +606,9 @@ const styles = StyleSheet.create({
   restLogo: { width: 60, height: 60, borderRadius: RADIUS.md, backgroundColor: COLORS.skeleton },
   restLogoPlaceholder: { backgroundColor: COLORS.primaryDark, justifyContent: 'center', alignItems: 'center' },
   restLogoInitial: { fontSize: 26, fontFamily: 'Outfit_700Bold', color: '#fff' },
-  restName: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary },
+  restName: { fontSize: 16, fontFamily: 'Outfit_600SemiBold', color: COLORS.textPrimary, flexShrink: 1 },
   restNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  verifiedBadge: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: COLORS.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  verifiedBadge: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: COLORS.primary + '15', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, flexShrink: 0 },
   verifiedText: { fontSize: 10.5, fontFamily: 'DMSans_700Bold', color: COLORS.primary },
   restCategory: { fontSize: 13, fontFamily: 'DMSans_400Regular', color: COLORS.textSecondary, marginTop: 1 },
   restMetaRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginTop: 6, flexWrap: 'wrap' },

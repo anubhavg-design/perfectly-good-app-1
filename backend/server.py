@@ -656,6 +656,14 @@ async def list_drops(
     vendor_cache = {v["vendor_id"]: v for v in vendors_list}
     drops = [item_to_drop(i, vendor_cache.get(i.get("vendor_id"))) for i in items]
 
+    # Always attach a distance (km) when we know the user's location
+    for d in drops:
+        vloc = d.get("vendor_location", {}) or {}
+        if lat is not None and lon is not None and vloc.get("lat") and vloc.get("lon"):
+            d["distance"] = round(haversine(lat, lon, vloc["lat"], vloc["lon"]), 1)
+        else:
+            d["distance"] = None
+
     if sort_by == "price":
         drops.sort(key=lambda d: d.get("discounted_price", 0))
     elif sort_by == "discount":
@@ -863,10 +871,15 @@ async def list_restaurants(
                 "_id": "$vendor_id",
                 "menu_count": {"$sum": 1},
                 "surplus_count": {"$sum": {"$cond": [{"$eq": ["$available_today", True]}, 1, 0]}},
+                "veg_count": {"$sum": {"$cond": [
+                    {"$and": [
+                        {"$ne": ["$food_type", "non_veg"]},
+                        {"$ne": ["$in_stock", False]},
+                    ]}, 1, 0]}},
             }},
         ]
         async for row in db.menu_items.aggregate(pipeline):
-            counts[row["_id"]] = {"menu_count": row["menu_count"], "surplus_count": row["surplus_count"]}
+            counts[row["_id"]] = {"menu_count": row["menu_count"], "surplus_count": row["surplus_count"], "veg_count": row.get("veg_count", 0)}
 
     out = []
     for v in vendors:
@@ -874,6 +887,7 @@ async def list_restaurants(
         c = counts.get(v["vendor_id"], {})
         pub["menu_count"] = c.get("menu_count", 0)
         pub["surplus_count"] = c.get("surplus_count", 0)
+        pub["has_veg"] = c.get("veg_count", 0) > 0
         loc = v.get("location", {}) or {}
         if lat is not None and lon is not None and loc.get("lat") and loc.get("lon"):
             pub["distance"] = round(haversine(lat, lon, loc["lat"], loc["lon"]), 1)
@@ -881,8 +895,11 @@ async def list_restaurants(
             pub["distance"] = None
         out.append(pub)
 
-    # Restaurants with active surplus deals first, then nearest
-    out.sort(key=lambda r: (0 if r["surplus_count"] > 0 else 1, r["distance"] if r["distance"] is not None else 99999))
+    # Nearest first, then by area (locality/address) alphabetically
+    out.sort(key=lambda r: (
+        r["distance"] if r["distance"] is not None else 99999,
+        ((r.get("location") or {}).get("address") or "").lower(),
+    ))
     return out
 
 @api.get("/restaurants/{vendor_id}")
@@ -993,6 +1010,7 @@ async def featured_deals(lat: Optional[float] = None, lon: Optional[float] = Non
         results.append({
             "vendor_id": vid,
             "vendor_name": v.get("name", ""),
+            "vendor_category": v.get("category", ""),
             "storefront_image": v.get("storefront_image", ""),
             "logo_url": v.get("logo_url", ""),
             "verified": pub.get("verified", False),
@@ -1064,6 +1082,7 @@ async def browse_deals(
             "discount": disc,
             "vendor_id": v.get("vendor_id"),
             "vendor_name": v.get("name", ""),
+            "category": v.get("category", ""),
             "verified": pub.get("verified", False),
             "distance": dist,
         })
@@ -1446,6 +1465,48 @@ async def user_orders(request: Request):
         if "created_at" in o and hasattr(o["created_at"], "isoformat"):
             o["created_at"] = o["created_at"].isoformat()
     return orders
+
+@api.get("/orders/{order_id}/reorder")
+async def reorder(order_id: str, request: Request):
+    """Return fresh checkout params for re-ordering a past order's item."""
+    user = await get_current_user(request)
+    order = await db.orders.find_one({"order_id": order_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    item = await db.menu_items.find_one({"menu_item_id": order.get("food_item_id")}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=400, detail="This item is no longer available")
+    vendor = await db.vendors.find_one({"vendor_id": item.get("vendor_id")}, {"_id": 0})
+    if not vendor or vendor.get("status") != "active":
+        raise HTTPException(status_code=400, detail="This restaurant is not currently accepting orders")
+    order_type = order.get("order_type", "surplus")
+    if order_type == "surplus":
+        if not item.get("available_today") or item.get("in_stock") is False:
+            raise HTTPException(status_code=400, detail="This surplus deal is no longer available")
+        price = item.get("discounted_price") or 0
+        max_qty = item.get("quantity_available") or 0
+    else:
+        if item.get("in_stock") is False:
+            raise HTTPException(status_code=400, detail="This item is currently out of stock")
+        disc = vendor.get("discount_percentage") or 0
+        base = item.get("original_price") or item.get("discounted_price") or 0
+        price = round(base * (1 - disc / 100), 2)
+        max_qty = 0
+    st = _open_status(vendor)
+    return {
+        "itemId": item.get("menu_item_id"),
+        "name": item.get("name", ""),
+        "price": price,
+        "originalPrice": item.get("original_price") or price,
+        "vendorName": vendor.get("name", ""),
+        "maxQty": max_qty,
+        "imageUrl": item.get("image_url", ""),
+        "orderType": order_type,
+        "isOpen": st["is_open"],
+        "openStatusText": st["status_text"],
+        "todayShifts": _vendor_hours(vendor).get(DAYS[datetime.now(IST).weekday()], []),
+    }
+
 
 @api.put("/orders/{order_id}/cancel")
 async def cancel_user_order(order_id: str, request: Request):

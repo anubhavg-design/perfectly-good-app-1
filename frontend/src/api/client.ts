@@ -238,6 +238,8 @@ export const ordersApi = {
 
   cancelOrder: (orderId: string) =>
     apiFetch(`/orders/${orderId}/cancel`, { method: 'PUT' }),
+
+  reorder: (orderId: string) => apiFetch(`/orders/${orderId}/reorder`),
 };
 
 // Vendor endpoints
