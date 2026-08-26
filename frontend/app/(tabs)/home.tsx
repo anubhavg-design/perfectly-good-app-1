@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, Image, ActivityIndicator, RefreshControl, ScrollView,
@@ -8,6 +8,8 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Search, SlidersHorizontal, MapPin, Clock, X, Sparkles, Store, ChevronRight, Heart, BadgeCheck, Tag } from 'lucide-react-native';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../src/constants/theme';
 import { dropsApi, restaurantsApi } from '../../src/api/client';
+import * as adapter from '../../src/api/adapter';
+import { SurplusRail } from '../../src/components/SurplusRail';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../src/context/AuthContext';
 import CachedImage from '../../src/components/CachedImage';
@@ -106,6 +108,7 @@ export default function HomeScreen() {
   const [restaurants, setRestaurants] = useState<any[]>([]);
   const [featured, setFeatured] = useState<any[]>([]);
   const [rOffset, setROffset] = useState(0);
+  const [rCursor, setRCursor] = useState<string | null>(null);
   const [rHasMore, setRHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [dropsLoading, setDropsLoading] = useState(true);
@@ -118,7 +121,6 @@ export default function HomeScreen() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
-  const [tick, setTick] = useState(0);
   const [showSignInHint, setShowSignInHint] = useState(true);
   const hasDataRef = useRef(false);
 
@@ -142,11 +144,8 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live countdown: refresh the surplus "time left" labels each minute.
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 60000);
-    return () => clearInterval(id);
-  }, []);
+  // Live countdown moved into <SurplusRail /> (Phase 4) so the 60s tick no
+  // longer forces the whole HomeScreen to re-render.
 
   useEffect(() => {
     if (user?.role === 'vendor') router.replace('/(tabs)/dashboard');
@@ -173,21 +172,25 @@ export default function HomeScreen() {
   // Cache freshness: silently re-fetch when returning to Home so new deals show up.
   const refreshSilently = useCallback(async () => {
     try {
-      const restRes = await restaurantsApi.list({
-        lat, lon, search: search || undefined, category: selectedCategory || undefined,
-        limit: PAGE_SIZE, offset: 0,
+      const restRes = await adapter.restaurants.list({
+        limit: PAGE_SIZE, cursor: null,
+        params: { lat, lon, search: search || undefined, category: selectedCategory || undefined },
       });
-      const list = restRes || [];
+      const list = restRes.items || [];
       setRestaurants(list);
       setROffset(list.length);
-      setRHasMore(list.length === PAGE_SIZE);
+      setRCursor(restRes.nextCursor);
+      setRHasMore(restRes.hasMore);
       if (!search && !selectedCategory) {
         AsyncStorage.setItem(HOME_CACHE_KEY, JSON.stringify(list)).catch(() => {});
       }
-      dropsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined })
-        .then((d) => setDrops(d || [])).catch(() => {});
-      restaurantsApi.featuredDeals({ lat, lon })
-        .then((f) => setFeatured(f || [])).catch(() => {});
+      adapter.drops.list({
+        limit: 20, cursor: null,
+        params: { lat, lon, search: search || undefined, category: selectedCategory || undefined },
+      }).then((d) => setDrops(d.items || [])).catch(() => {});
+      adapter.featuredDeals.list({
+        limit: 10, cursor: null, params: { lat, lon },
+      }).then((f) => setFeatured(f.items || [])).catch(() => {});
     } catch (err) {
       console.log('Silent refresh failed', err);
     }
@@ -213,14 +216,15 @@ export default function HomeScreen() {
     if (!hasDataRef.current) setLoading(true);
     // Restaurants — first page only (blocks the initial gate)
     try {
-      const restRes = await restaurantsApi.list({
-        lat, lon, search: search || undefined, category: selectedCategory || undefined,
-        limit: PAGE_SIZE, offset: 0,
+      const restRes = await adapter.restaurants.list({
+        limit: PAGE_SIZE, cursor: null,
+        params: { lat, lon, search: search || undefined, category: selectedCategory || undefined },
       });
-      const list = restRes || [];
+      const list = restRes.items || [];
       setRestaurants(list);
       setROffset(list.length);
-      setRHasMore(list.length === PAGE_SIZE);
+      setRCursor(restRes.nextCursor);
+      setRHasMore(restRes.hasMore);
       hasDataRef.current = true;
       if (isDefaultView) {
         AsyncStorage.setItem(HOME_CACHE_KEY, JSON.stringify(list)).catch(() => {});
@@ -232,24 +236,28 @@ export default function HomeScreen() {
     }
     // Surplus + featured load in the background so a slow call never blocks the page
     setDropsLoading(true);
-    dropsApi.list({ lat, lon, search: search || undefined, category: selectedCategory || undefined })
-      .then((d) => setDrops(d || [])).catch(() => {}).finally(() => setDropsLoading(false));
-    restaurantsApi.featuredDeals({ lat, lon })
-      .then((f) => setFeatured(f || [])).catch(() => {});
+    adapter.drops.list({
+      limit: 20, cursor: null,
+      params: { lat, lon, search: search || undefined, category: selectedCategory || undefined },
+    }).then((d) => setDrops(d.items || [])).catch(() => {}).finally(() => setDropsLoading(false));
+    adapter.featuredDeals.list({
+      limit: 10, cursor: null, params: { lat, lon },
+    }).then((f) => setFeatured(f.items || [])).catch(() => {});
   };
 
   const loadMoreRestaurants = async () => {
     if (loadingMore || !rHasMore || loading) return;
     setLoadingMore(true);
     try {
-      const more = await restaurantsApi.list({
-        lat, lon, search: search || undefined, category: selectedCategory || undefined,
-        limit: PAGE_SIZE, offset: rOffset,
+      const more = await adapter.restaurants.list({
+        limit: PAGE_SIZE, cursor: rCursor,
+        params: { lat, lon, search: search || undefined, category: selectedCategory || undefined },
       });
-      const list = more || [];
+      const list = more.items || [];
       setRestaurants((prev) => [...prev, ...list]);
       setROffset((prev) => prev + list.length);
-      setRHasMore(list.length === PAGE_SIZE);
+      setRCursor(more.nextCursor);
+      setRHasMore(more.hasMore);
     } catch (err) {
       console.log('Failed to load more restaurants', err);
     } finally {
@@ -265,56 +273,7 @@ export default function HomeScreen() {
 
   const openRestaurant = useCallback((vendorId: string) => router.push(`/restaurant/${vendorId}`), [router]);
 
-  const renderSurplusCard = ({ item }: { item: any }) => {
-    const activePrice = item.price ?? item.discounted_price ?? item.original_price;
-    const discount = getDiscount(item.original_price, activePrice);
-    const timeLeft = getTimeRemaining(item.pickup_end_time);
-    return (
-      <TouchableOpacity
-        testID={`surplus-card-${item.item_id}`}
-        style={styles.surplusCard}
-        onPress={() => router.push(`/drop/${item.item_id}`)}
-        activeOpacity={0.85}
-      >
-        <View>
-          <CachedImage uri={item.thumbnail_url || item.image_url} style={styles.surplusImage} />
-          {discount > 0 ? (
-            <View style={styles.discountBadge}>
-              <Text style={styles.discountBadgeText}>{discount}% OFF</Text>
-            </View>
-          ) : null}
-        </View>
-        <View style={styles.surplusBody}>
-          <Text style={styles.surplusName} numberOfLines={1}>{item.name}</Text>
-          <Text style={styles.surplusVendor} numberOfLines={1}>{item.vendor_name}</Text>
-          <View style={styles.cardMetaRow}>
-            {item.vendor_category ? <Text style={styles.cardMetaText}>{item.vendor_category}</Text> : null}
-            {item.vendor_category && item.distance != null ? <Text style={styles.cardMetaDot}>·</Text> : null}
-            {item.distance != null ? (
-              <View style={styles.cardMetaDist}>
-                <MapPin size={10} color={COLORS.textMuted} />
-                <Text style={styles.cardMetaText}>{item.distance} km</Text>
-              </View>
-            ) : null}
-          </View>
-          <View style={styles.surplusPriceRow}>
-            <Text style={styles.surplusPrice}>₹{item.price ?? item.discounted_price ?? item.original_price}</Text>
-            {item.original_price > (item.price ?? item.discounted_price ?? item.original_price) ? (
-              <Text style={styles.surplusStrike}>₹{item.original_price}</Text>
-            ) : null}
-          </View>
-          {timeLeft ? (
-            <View style={styles.surplusTimer}>
-              <Clock size={11} color={COLORS.accentUrgent} />
-              <Text style={styles.surplusTimerText}>Ends in {timeLeft}</Text>
-            </View>
-          ) : null}
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  const renderFeaturedCard = ({ item }: { item: any }) => (
+  const renderFeaturedCard = useCallback(({ item }: { item: any }) => (
     <TouchableOpacity
       testID={`featured-card-${item.vendor_id}`}
       style={styles.featuredCard}
@@ -357,16 +316,29 @@ export default function HomeScreen() {
         </View>
       </View>
     </TouchableOpacity>
-  );
+  ), [router]);
 
   const renderRestaurant = useCallback(({ item }: { item: any }) => (
     <RestaurantCard item={item} onPress={openRestaurant} />
   ), [openRestaurant]);
 
   const isVeg = (ft: string) => ft !== 'non_veg';
-  const vegDrops = vegOnly ? drops.filter((d: any) => isVeg(d.food_type)) : drops;
-  const vegFeatured = vegOnly ? featured.filter((f: any) => isVeg(f.food_type)) : featured;
-  const vegRestaurants = vegOnly ? restaurants.filter((r: any) => r.has_veg) : restaurants;
+  const vegDrops = useMemo(
+    () => (vegOnly ? drops.filter((d: any) => isVeg(d.food_type)) : drops),
+    [vegOnly, drops],
+  );
+  const vegFeatured = useMemo(
+    () => (vegOnly ? featured.filter((f: any) => isVeg(f.food_type)) : featured),
+    [vegOnly, featured],
+  );
+  const vegRestaurants = useMemo(
+    () => (vegOnly ? restaurants.filter((r: any) => r.has_veg) : restaurants),
+    [vegOnly, restaurants],
+  );
+  const restaurantsData = useMemo(
+    () => (surplusOnly ? vegRestaurants.filter((r) => (r.surplus_count || 0) > 0) : vegRestaurants),
+    [surplusOnly, vegRestaurants],
+  );
 
   const ListHeader = (
     <View>
@@ -502,24 +474,7 @@ export default function HomeScreen() {
         </View>
         <Text style={styles.sectionSub}>Upto 70% off. Grab it before it&apos;s gone</Text>
       </View>
-      {dropsLoading ? (
-        <ListSkeleton count={3} variant="deal" />
-      ) : vegDrops.length === 0 ? (
-        <View style={styles.surplusEmpty}>
-          <Text style={styles.surplusEmptyText}>No surplus deals right now. Check back soon!</Text>
-        </View>
-      ) : (
-        <FlatList
-          testID="surplus-list"
-          data={vegDrops}
-          extraData={tick}
-          renderItem={renderSurplusCard}
-          keyExtractor={(item) => item.item_id}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.surplusListContent}
-        />
-      )}
+      <SurplusRail items={vegDrops} loading={dropsLoading} />
 
       {/* Featured Deals */}
       {!surplusOnly && vegFeatured.length > 0 ? (
@@ -567,7 +522,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
         testID="restaurants-list"
-        data={surplusOnly ? vegRestaurants.filter((r) => (r.surplus_count || 0) > 0) : vegRestaurants}
+        data={restaurantsData}
         renderItem={renderRestaurant}
         keyExtractor={(item) => item.vendor_id}
         ListHeaderComponent={ListHeader}

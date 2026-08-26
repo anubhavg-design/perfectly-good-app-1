@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  RefreshControl, ScrollView,
+  RefreshControl, ScrollView, ActivityIndicator, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -9,12 +9,14 @@ import { ArrowLeft, MapPin } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { dropsApi } from '../src/api/client';
+import * as adapter from '../src/api/adapter';
 import CachedImage from '../src/components/CachedImage';
 import VegDot from '../src/components/VegDot';
 import { ListSkeleton } from '../src/components/Skeleton';
 
 const DEFAULT_LAT = 12.9716;
 const DEFAULT_LON = 77.5946;
+const PAGE_SIZE = 10;
 
 const PRICE_FILTERS = [
   { key: 0, label: 'All' },
@@ -37,6 +39,9 @@ export default function SurplusScreen() {
   const [drops, setDrops] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const [priceMax, setPriceMax] = useState(0);
   const [sortBy, setSortBy] = useState('price');
   const [vegOnly, setVegOnly] = useState(false);
@@ -59,14 +64,39 @@ export default function SurplusScreen() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await dropsApi.list({ lat, lon, sort_by: sortBy });
-      setDrops(res || []);
+      const res = await adapter.drops.list({
+        limit: PAGE_SIZE, cursor: null,
+        params: { lat, lon, sort_by: sortBy },
+      });
+      const items = res.items || [];
+      setDrops(items);
+      setCursor(res.nextCursor);
+      setHasMore(res.hasMore);
     } catch (err) {
       console.log('Failed to load surplus deals', err);
     } finally {
       setLoading(false);
     }
   }, [lat, lon, sortBy]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || loading) return;
+    setLoadingMore(true);
+    try {
+      const res = await adapter.drops.list({
+        limit: PAGE_SIZE, cursor,
+        params: { lat, lon, sort_by: sortBy },
+      });
+      const items = res.items || [];
+      setDrops((prev) => [...prev, ...items]);
+      setCursor(res.nextCursor);
+      setHasMore(res.hasMore);
+    } catch (err) {
+      console.log('Failed to load more surplus deals', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [lat, lon, sortBy, cursor, hasMore, loadingMore, loading]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -78,7 +108,7 @@ export default function SurplusScreen() {
 
   const getDiscount = (op: number, p: number) => (op && p < op ? Math.round(((op - p) / op) * 100) : 0);
 
-  const renderCard = ({ item }: { item: any }) => {
+  const renderCard = useCallback(({ item }: { item: any }) => {
     const price = activePrice(item);
     const discount = getDiscount(item.original_price, price);
     return (
@@ -115,13 +145,14 @@ export default function SurplusScreen() {
         ) : null}
       </TouchableOpacity>
     );
-  };
+  }, [router]);
 
-  const data = drops.filter((d) => {
+  // Client-side veg/price filters apply on the accumulated list (post-pagination).
+  const data = useMemo(() => drops.filter((d) => {
     if (vegOnly && d.food_type === 'non_veg') return false;
     if (priceMax && !(activePrice(d) < priceMax)) return false;
     return true;
-  });
+  }), [drops, vegOnly, priceMax]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -188,6 +219,19 @@ export default function SurplusScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+          onEndReached={loadMore}
+          onEndReachedThreshold={1.5}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS !== 'ios'}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.listFooter}><ActivityIndicator size="small" color={COLORS.primary} /></View>
+            ) : (!hasMore && data.length > 0 ? (
+              <View style={styles.listFooter}><Text style={styles.footerText}>You've seen all deals</Text></View>
+            ) : null)
+          }
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No surplus deals</Text>
@@ -201,6 +245,8 @@ export default function SurplusScreen() {
 }
 
 const styles = StyleSheet.create({
+  listFooter: { paddingVertical: SPACING.lg, alignItems: 'center' },
+  footerText: { fontFamily: 'Outfit_400Regular', fontSize: 12, color: COLORS.textMuted },
   container: { flex: 1, backgroundColor: COLORS.background },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   headerTitle: { fontSize: 20, fontFamily: 'Outfit_700Bold', color: COLORS.textPrimary },

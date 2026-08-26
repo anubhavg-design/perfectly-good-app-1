@@ -9,6 +9,7 @@ import { ArrowLeft, MapPin, BadgeCheck } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../src/constants/theme';
 import { restaurantsApi } from '../src/api/client';
+import * as adapter from '../src/api/adapter';
 import CachedImage from '../src/components/CachedImage';
 import VegDot from '../src/components/VegDot';
 import { ListSkeleton } from '../src/components/Skeleton';
@@ -75,6 +76,7 @@ export default function BrowseDealsScreen() {
   const [lat, setLat] = useState(DEFAULT_LAT);
   const [lon, setLon] = useState(DEFAULT_LON);
   const [offset, setOffset] = useState(0);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -94,11 +96,15 @@ export default function BrowseDealsScreen() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await restaurantsApi.browseDeals({ lat, lon, sort_by: sortBy, limit: PAGE_SIZE, offset: 0 });
-      const list = res || [];
+      const res = await adapter.browseDeals.list({
+        limit: PAGE_SIZE, cursor: null,
+        params: { lat, lon, sort_by: sortBy },
+      });
+      const list = res.items || [];
       setDeals(list);
       setOffset(list.length);
-      setHasMore(list.length === PAGE_SIZE);
+      setCursor(res.nextCursor);
+      setHasMore(res.hasMore);
     } catch (err) {
       console.log('Failed to load browse deals', err);
     } finally {
@@ -110,17 +116,21 @@ export default function BrowseDealsScreen() {
     if (loadingMore || !hasMore || loading) return;
     setLoadingMore(true);
     try {
-      const res = await restaurantsApi.browseDeals({ lat, lon, sort_by: sortBy, limit: PAGE_SIZE, offset });
-      const list = res || [];
+      const res = await adapter.browseDeals.list({
+        limit: PAGE_SIZE, cursor,
+        params: { lat, lon, sort_by: sortBy },
+      });
+      const list = res.items || [];
       setDeals((prev) => [...prev, ...list]);
       setOffset((prev) => prev + list.length);
-      setHasMore(list.length === PAGE_SIZE);
+      setCursor(res.nextCursor);
+      setHasMore(res.hasMore);
     } catch (err) {
       console.log('Failed to load more deals', err);
     } finally {
       setLoadingMore(false);
     }
-  }, [lat, lon, sortBy, offset, hasMore, loadingMore, loading]);
+  }, [lat, lon, sortBy, cursor, hasMore, loadingMore, loading]);
 
   useEffect(() => {
     loadData();

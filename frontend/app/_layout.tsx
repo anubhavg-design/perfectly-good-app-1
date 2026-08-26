@@ -20,8 +20,13 @@ import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, ActivityIndicator, StyleSheet, Platform, Alert } from 'react-native';
 import { COLORS } from '../src/constants/theme';
+import { initConfig } from '../src/api/config';
 
 SplashScreen.preventAutoHideAsync();
+
+// Phase 3: kick off config fetch as soon as the JS bundle loads. Background,
+// non-blocking; adapter falls back to v1 defaults until this resolves.
+initConfig().catch(() => {});
 
 // Foreground display behaviour — MODULE SCOPE (native only)
 if (Platform.OS !== 'web') {

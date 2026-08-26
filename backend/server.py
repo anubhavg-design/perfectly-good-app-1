@@ -32,6 +32,7 @@ import io
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import hashlib
 
 # Sold-out items reset daily at midnight IST; helpers below.
 IST = ZoneInfo("Asia/Kolkata")
@@ -228,6 +229,9 @@ DEFAULT_SETTINGS = {
     "categories": ["Bakery", "Restaurant", "Cafe", "Grocery", "QSR", "Cloud Kitchen", "Dessert"],
     "pickup_slots": ["12:00-15:00", "15:00-18:00", "17:00-20:00", "18:00-21:00", "19:00-22:00"],
     "service_types": ["takeaway", "dine_in", "both"],
+    # Phase 3: v1↔v2 list rollout controls. Defaults are safe (0% = everyone on v1).
+    "v2_lists_rollout_pct": 0,
+    "config_cache_ttl_seconds": 300,
 }
 
 
@@ -300,7 +304,13 @@ def geocode_address(address: str) -> dict:
     return {}
 
 # ── App ─────────────────────────────────────────────────────────────────
-app = FastAPI()
+# OpenAPI/docs mounted under /api/* so the preview ingress (which only proxies
+# /api/*) can reach them. Do not change these URLs — tooling depends on them.
+app = FastAPI(
+    openapi_url="/api/openapi.json",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+)
 api = APIRouter(prefix="/api")
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -4649,134 +4659,11 @@ async def seed_data():
             })
             logger.info(f"Staff seeded: {email} ({role})")
 
-    # Create indexes
-    await db.users.create_index("email", unique=True)
-    await db.users.create_index("user_id", unique=True)
-    await db.vendors.create_index("vendor_id", unique=True)
-    await db.vendors.create_index("user_id")
-    await db.drops.create_index("item_id", unique=True)
-    await db.drops.create_index("vendor_id")
-    await db.menu_items.create_index("menu_item_id", unique=True)
-    await db.menu_items.create_index("vendor_id")
-    # Perf indexes for home/browse queries
-    await db.vendors.create_index("status")
-    await db.vendors.create_index("category")
-    await db.vendors.create_index([("status", 1), ("category", 1)])
-    await db.vendors.create_index([("location_geo", "2dsphere")])
-    # Backfill GeoJSON points for existing vendors so $geoNear can use the index.
-    async for _v in db.vendors.find({"location_geo": {"$exists": False}}, {"_id": 0, "vendor_id": 1, "location": 1}):
-        gp = _geo_point(_v.get("location") or {})
-        await db.vendors.update_one({"vendor_id": _v["vendor_id"]}, {"$set": {"location_geo": gp}})
-    await db.menu_items.create_index("available_today")
-    await db.menu_items.create_index([("vendor_id", 1), ("available_today", 1)])
-    await db.menu_items.create_index([("available_today", 1), ("in_stock", 1)])
-    await db.menu_items.create_index([("vendor_id", 1), ("in_stock", 1)])
-    await db.menu_items.create_index("food_type")
-    await db.orders.create_index([("vendor_id", 1), ("status", 1)])
-    await db.orders.create_index([("user_id", 1), ("status", 1)])
-    await db.orders.create_index("order_id", unique=True)
-    await db.orders.create_index("user_id")
-    await db.orders.create_index("vendor_id")
-    logger.info("Database indexes created")
+    # Index management moved to scripts/migrate_indexes.py — run manually after deploy.
 
-# ── Migration & staff seeding ───────────────────────────────────────────
-STAFF_SEED = [
-    {"email": "operations@perfectlygood.in", "password": "ops12345", "role": "operations", "name": "Ops Team"},
-    {"email": "success@perfectlygood.in", "password": "success12345", "role": "customer_success", "name": "Customer Success"},
-    {"email": "finance@perfectlygood.in", "password": "finance12345", "role": "finance", "name": "Finance Team"},
-]
-
-
-async def migrate_v2():
-    """Idempotent: unify drops into menu_items, backfill new vendor/menu fields, seed staff."""
-    await get_settings_doc()
-    now = datetime.now(timezone.utc)
-
-    # 1. Backfill vendor fields
-    async for v in db.vendors.find({}):
-        updates = {}
-        defaults = {
-            "status": "active", "service_type": v.get("service_type", "both"),
-            "owner_name": "", "restaurant_phone": "", "full_address": v.get("location", {}).get("address", "") if isinstance(v.get("location"), dict) else "",
-            "maps_link": v.get("location", {}).get("maps_url", "") if isinstance(v.get("location"), dict) else "",
-            "assigned_ops": "", "notes": [], "pickup_start_time": "18:00", "pickup_end_time": "21:00",
-            "discount_percentage": 0, "storefront_image": "",
-            "created_at": now, "updated_at": now, "last_order_date": None,
-        }
-        for k, val in defaults.items():
-            if k not in v:
-                updates[k] = val
-        if updates:
-            await db.vendors.update_one({"vendor_id": v["vendor_id"]}, {"$set": updates})
-
-    # 2. Backfill menu_item fields + pull discount/qty/pickup from drops
-    drops = await db.drops.find({}, {"_id": 0}).to_list(100000)
-    drop_by_menu = {}
-    drop_itemid_to_menu = {}
-    for d in drops:
-        mid = d.get("menu_item_id")
-        if mid:
-            drop_by_menu[mid] = d
-            if d.get("item_id"):
-                drop_itemid_to_menu[d["item_id"]] = mid
-        # set vendor pickup time from drop if vendor still default
-        if d.get("pickup_start_time"):
-            await db.vendors.update_one(
-                {"vendor_id": d.get("vendor_id"), "pickup_start_time": {"$in": [None, "", "18:00"]}},
-                {"$set": {"pickup_start_time": d["pickup_start_time"], "pickup_end_time": d.get("pickup_end_time", "21:00")}},
-            )
-
-    async for m in db.menu_items.find({}):
-        mid = m["menu_item_id"]
-        d = drop_by_menu.get(mid)
-        updates = {}
-        if "discounted_price" not in m:
-            if d:
-                updates["discounted_price"] = d.get("discounted_price")
-            else:
-                updates["discounted_price"] = round(m.get("original_price", 0) * 0.6, 2)
-        if "available_today" not in m:
-            updates["available_today"] = bool(d.get("is_active")) if d else False
-        if "quantity_available" not in m:
-            updates["quantity_available"] = d.get("quantity_available") if d else None
-        if "expiry" not in m:
-            updates["expiry"] = d.get("expiry", "") if d else ""
-        for k, val in (("food_type", "veg"), ("contains_egg", False), ("serving_size", ""), ("category", "")):
-            if k not in m:
-                updates[k] = val
-        if "created_at" not in m:
-            updates["created_at"] = now
-        if updates:
-            await db.menu_items.update_one({"menu_item_id": mid}, {"$set": updates})
-
-    # 3. Remap legacy orders: food_item_id was a drop item_id -> menu_item_id; store item_subtotal
-    if drop_itemid_to_menu:
-        async for o in db.orders.find({"food_item_id": {"$in": list(drop_itemid_to_menu.keys())}}):
-            new_mid = drop_itemid_to_menu.get(o.get("food_item_id"))
-            d = drops and next((x for x in drops if x.get("item_id") == o.get("food_item_id")), None)
-            set_fields = {"food_item_id": new_mid, "legacy_item_id": o.get("food_item_id")}
-            if d and o.get("item_subtotal") is None:
-                set_fields["item_subtotal"] = round(d.get("discounted_price", 0) * o.get("quantity", 1), 2)
-                set_fields["discounted_price"] = d.get("discounted_price", 0)
-            await db.orders.update_one({"order_id": o["order_id"]}, {"$set": set_fields})
-
-    # 4. Seed staff (idempotent)
-    for s in STAFF_SEED:
-        existing = await db.users.find_one({"email": s["email"]})
-        if not existing:
-            await db.users.insert_one({
-                "user_id": gen_id("user"), "email": s["email"], "name": s["name"],
-                "password_hash": hash_password(s["password"]), "role": s["role"],
-                "permission_overrides": {}, "picture": None, "location": None,
-                "created_at": now,
-            })
-            logger.info(f"Staff seeded: {s['email']}")
-        elif existing.get("role") not in STAFF_ROLES:
-            await db.users.update_one({"email": s["email"]}, {"$set": {"role": s["role"]}})
-
-    # Promote known founder admin if present
-    await db.users.update_one({"email": "anubhavg@perfectlygood.in"}, {"$set": {"role": "admin"}})
-    logger.info("migrate_v2 complete")
+# ── Migration moved out ─────────────────────────────────────────────────
+# STAFF_SEED and migrate_v2() have been relocated to scripts/migrate_v2.py.
+# Run `python -m scripts.migrate_v2` after deploy (idempotent).
 
 
 # ── Deal alerts opt-in (warm empty state on onboarding) ─────────────────
@@ -4877,7 +4764,7 @@ async def send_pickup_reminders():
 @app.on_event("startup")
 async def startup():
     await seed_data()
-    await migrate_v2()
+    # migrate_v2 relocated to scripts/migrate_v2.py — run manually after deploy.
     # Bring back items whose sold-out day has passed while the server was down.
     await reset_sold_out_items(catch_up=True)
     # Reset every sold-out item back to available at 00:00 IST daily.
@@ -4902,8 +4789,642 @@ async def shutdown():
     await _push_client.aclose()
     mongo_client.close()
 
+# ══════════════════════════════════════════════════════════════════════════
+#  CLIENT CONFIG  (Phase 3 — remote config flag with hard version gate)
+# ══════════════════════════════════════════════════════════════════════════
+_MIN_V2_VERSION = (1, 0, 3)
+
+
+def _parse_semver(s: Optional[str]) -> Optional[tuple]:
+    """Return a 3-tuple of ints for a semver string, or None if unparseable."""
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        parts = s.strip().lstrip("v").split(".")[:3]
+        while len(parts) < 3:
+            parts.append("0")
+        return tuple(int(p) for p in parts)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _resolve_use_v2(x_app_version: Optional[str], bucket_key: Optional[str], rollout_pct) -> bool:
+    """Deterministic per-client v1↔v2 flag. See PRD Phase 3.
+
+    Rules, in order:
+      1. Missing/unparseable version  → False (safest).
+      2. Client version < 1.0.3       → False (hard gate — protects the 1.0.2 store binary).
+      3. Rollout pct out of range     → normalize to [0,100].
+      4. rollout_pct == 0             → False for everyone.
+      5. rollout_pct == 100           → True for everyone.
+      6. No bucket_key available      → False (can't bucket deterministically).
+      7. Otherwise: sha256(bucket_key) mod 100 < rollout_pct → True.
+    """
+    ver = _parse_semver(x_app_version)
+    if ver is None:
+        return False
+    if ver < _MIN_V2_VERSION:
+        return False
+    try:
+        pct = int(rollout_pct)
+    except (TypeError, ValueError):
+        pct = 0
+    if pct <= 0:
+        return False
+    if pct >= 100:
+        return True
+    if not bucket_key:
+        return False
+    bucket = int(hashlib.sha256(bucket_key.encode("utf-8")).hexdigest()[:8], 16) % 100
+    return bucket < pct
+
+
+@api.get("/config")
+async def get_client_config(request: Request):
+    """Client bootstrap config. Never raises; always returns a safe payload.
+
+    Auth is optional: when the JWT cookie/header is present we bucket on
+    `user_id` (stable across devices for the same user); otherwise on
+    `X-Client-Id` (stable across launches on the same device).
+    """
+    x_app_version = request.headers.get("X-App-Version") or request.headers.get("x-app-version")
+    x_client_id = request.headers.get("X-Client-Id") or request.headers.get("x-client-id")
+
+    bucket_key: Optional[str] = None
+    # Best-effort auth — never raise from /config even if the token is stale.
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if token:
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            if payload.get("type") == "access" and payload.get("sub"):
+                bucket_key = f"user:{payload['sub']}"
+        except Exception:
+            bucket_key = None
+    if not bucket_key and x_client_id:
+        bucket_key = f"client:{x_client_id}"
+
+    try:
+        cfg = await get_settings_doc()
+    except Exception as e:
+        logger.warning(f"/config: settings fetch failed, using defaults: {e}")
+        cfg = {}
+
+    rollout_pct = cfg.get("v2_lists_rollout_pct", 0)
+    cache_ttl = cfg.get("config_cache_ttl_seconds", 300)
+    try:
+        cache_ttl = int(cache_ttl)
+        if cache_ttl < 30:
+            cache_ttl = 300
+    except (TypeError, ValueError):
+        cache_ttl = 300
+
+    use_v2 = _resolve_use_v2(x_app_version, bucket_key, rollout_pct)
+
+    return {
+        "use_v2_lists": use_v2,
+        "cache_ttl_seconds": cache_ttl,
+        "min_supported_version": "1.0.0",
+        "server_time": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  V2 LIST ENDPOINTS (Phase 1) — additive only. v1 handlers above are frozen
+#  and byte-compatible. All pagination/sort/limit runs inside MongoDB.
+# ══════════════════════════════════════════════════════════════════════════
+from bson import ObjectId as _ObjectId
+from bson.errors import InvalidId as _BsonInvalidId
+
+api_v2 = APIRouter(prefix="/api/v2")
+
+_V2_DEFAULT_LIMIT = 10
+_V2_MAX_LIMIT = 50
+
+
+def _v2_clamp_limit(limit: Optional[int]) -> int:
+    if limit is None or limit < 1:
+        return _V2_DEFAULT_LIMIT
+    return min(limit, _V2_MAX_LIMIT)
+
+
+def _v2_encode_cursor(data: dict) -> str:
+    payload = {"v": 1, **data}
+    return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+
+
+def _v2_decode_cursor(cursor: Optional[str]) -> Optional[dict]:
+    if not cursor:
+        return None
+    try:
+        s = cursor + "=" * (-len(cursor) % 4)
+        raw = base64.urlsafe_b64decode(s.encode()).decode()
+        obj = json.loads(raw)
+        if not isinstance(obj, dict) or obj.get("v") != 1:
+            raise ValueError("bad cursor version")
+        return obj
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid_cursor"})
+
+
+def _v2_to_oid(s: str) -> _ObjectId:
+    try:
+        return _ObjectId(s)
+    except (_BsonInvalidId, TypeError):
+        raise HTTPException(status_code=400, detail={"error": "invalid_cursor"})
+
+
+def _v2_vendor_verified(v: dict) -> bool:
+    ver = v.get("verification") or {}
+    agreement = ver.get("agreement") or {}
+    return v.get("status") == "active" and bool(agreement.get("accepted")) and bool((ver.get("fssai_number") or "").strip())
+
+
+def _v2_restaurant_card(v: dict, distance_km: Optional[float]) -> dict:
+    st = _open_status(v)
+    return {
+        "vendor_id": v.get("vendor_id"),
+        "name": v.get("name", ""),
+        "category": v.get("category", ""),
+        "thumbnail": v.get("storefront_thumbnail", "") or v.get("storefront_image", ""),
+        "logo": v.get("logo_url", ""),
+        "discount_percentage": v.get("discount_percentage", 0) or 0,
+        "is_open": st["is_open"],
+        "verified": _v2_vendor_verified(v),
+        "distance_km": distance_km,
+        "menu_count": v.get("menu_count", 0) or 0,
+        "surplus_count": v.get("surplus_count", 0) or 0,
+        "has_veg": (v.get("veg_count", 0) or 0) > 0,
+    }
+
+
+def _v2_slim_menu_card(item: dict, vendor: dict, distance_km: Optional[float]) -> dict:
+    """Shared card shape for /v2/drops and /v2/browse-deals.
+    Detail views (v1 /drops/{item_id}) still carry the full field set."""
+    op = item.get("original_price") or 0
+    dp = item.get("discounted_price") or 0
+    is_surplus = bool(item.get("available_today")) and dp > 0 and dp < op
+    if is_surplus:
+        price = dp
+        discount_pct = round(((op - dp) / op) * 100) if op else 0
+    else:
+        vd = vendor.get("discount_percentage") or 0
+        price = round(op * (1 - vd / 100), 2) if op else 0
+        discount_pct = round(vd)
+    return {
+        "item_id": item.get("menu_item_id"),
+        "vendor_id": item.get("vendor_id"),
+        "vendor_name": vendor.get("name", ""),
+        "vendor_category": vendor.get("category", ""),
+        "name": item.get("name", ""),
+        "food_type": item.get("food_type", "veg"),
+        "contains_egg": bool(item.get("contains_egg")),
+        "original_price": op,
+        "discounted_price": price,
+        "discount_percentage": discount_pct,
+        "image_url": item.get("image_url", ""),
+        "thumbnail_url": item.get("thumbnail_url") or item.get("image_url", ""),
+        "quantity_available": item.get("quantity_available") if is_surplus else None,
+        "pickup_end_time": vendor.get("pickup_end_time", ""),
+        "distance_km": distance_km,
+    }
+
+
+# ── /api/v2/restaurants ─────────────────────────────────────────────────
+@api_v2.get("/restaurants")
+async def v2_list_restaurants(
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    search: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: Optional[int] = _V2_DEFAULT_LIMIT,
+    cursor: Optional[str] = None,
+):
+    limit = _v2_clamp_limit(limit)
+    fetch = limit + 1
+    cur = _v2_decode_cursor(cursor)
+
+    base_match: dict = {"status": "active"}
+    if category:
+        base_match["category"] = category
+    if search:
+        base_match["name"] = {"$regex": search, "$options": "i"}
+
+    # One pipeline lookup replaces v1's second aggregate for menu/surplus/veg counts.
+    counts_lookup = {
+        "$lookup": {
+            "from": "menu_items",
+            "let": {"vid": "$vendor_id"},
+            "pipeline": [
+                {"$match": {"$expr": {"$eq": ["$vendor_id", "$$vid"]}}},
+                {"$group": {
+                    "_id": None,
+                    "menu_count": {"$sum": 1},
+                    "surplus_count": {"$sum": {"$cond": [{"$eq": ["$available_today", True]}, 1, 0]}},
+                    "veg_count": {"$sum": {"$cond": [
+                        {"$and": [
+                            {"$ne": ["$food_type", "non_veg"]},
+                            {"$ne": ["$in_stock", False]},
+                        ]}, 1, 0]}},
+                }},
+            ],
+            "as": "_counts",
+        }
+    }
+    counts_project = {
+        "$addFields": {
+            "menu_count": {"$ifNull": [{"$arrayElemAt": ["$_counts.menu_count", 0]}, 0]},
+            "surplus_count": {"$ifNull": [{"$arrayElemAt": ["$_counts.surplus_count", 0]}, 0]},
+            "veg_count": {"$ifNull": [{"$arrayElemAt": ["$_counts.veg_count", 0]}, 0]},
+        }
+    }
+
+    if lat is not None and lon is not None:
+        offset = int((cur or {}).get("offset") or 0)
+        pipeline = [
+            {"$geoNear": {
+                "near": {"type": "Point", "coordinates": [lon, lat]},
+                "distanceField": "_dist_m",
+                "spherical": True,
+                "key": "location_geo",
+                "query": base_match,
+            }},
+            {"$skip": offset},
+            {"$limit": fetch},
+            counts_lookup,
+            counts_project,
+        ]
+        docs = await db.vendors.aggregate(pipeline).to_list(fetch)
+        has_more = len(docs) > limit
+        page = docs[:limit] if has_more else docs
+        items = [_v2_restaurant_card(v, round(v.get("_dist_m", 0) / 1000, 1)) for v in page]
+        next_cursor = _v2_encode_cursor({"offset": offset + limit}) if has_more else None
+    else:
+        last_name = (cur or {}).get("last_name")
+        last_id = (cur or {}).get("last_id")
+        match = dict(base_match)
+        if last_name is not None and last_id is not None:
+            match["$and"] = [{"$or": [
+                {"name": {"$gt": last_name}},
+                {"name": last_name, "_id": {"$gt": _v2_to_oid(last_id)}},
+            ]}]
+        pipeline = [
+            {"$match": match},
+            {"$sort": {"name": 1, "_id": 1}},
+            {"$limit": fetch},
+            counts_lookup,
+            counts_project,
+        ]
+        docs = await db.vendors.aggregate(pipeline).to_list(fetch)
+        has_more = len(docs) > limit
+        page = docs[:limit] if has_more else docs
+        items = [_v2_restaurant_card(v, None) for v in page]
+        if has_more and page:
+            last = page[-1]
+            next_cursor = _v2_encode_cursor({"last_name": last.get("name", ""), "last_id": str(last["_id"])})
+        else:
+            next_cursor = None
+
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+
+
+# ── /api/v2/drops ───────────────────────────────────────────────────────
+@api_v2.get("/drops")
+async def v2_list_drops(
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    search: Optional[str] = None,
+    category: Optional[str] = None,
+    max_price: Optional[float] = None,
+    sort_by: Optional[str] = None,
+    limit: Optional[int] = _V2_DEFAULT_LIMIT,
+    cursor: Optional[str] = None,
+):
+    limit = _v2_clamp_limit(limit)
+    fetch = limit + 1
+    cur = _v2_decode_cursor(cursor)
+    effective_sort = sort_by or ("distance" if (lat is not None and lon is not None) else "price")
+
+    item_match: dict = {"available_today": True, "in_stock": {"$ne": False}}
+    if max_price is not None:
+        item_match["discounted_price"] = {"$lte": max_price}
+    if search:
+        item_match["name"] = {"$regex": search, "$options": "i"}
+
+    if effective_sort == "distance" and lat is not None and lon is not None:
+        # Start from vendors so $geoNear owns the sort order.
+        offset = int((cur or {}).get("offset") or 0)
+        vendor_match: dict = {"status": "active"}
+        if category:
+            vendor_match["category"] = category
+        items_lookup_pipeline = [
+            {"$match": {"$expr": {"$eq": ["$vendor_id", "$$vid"]}}},
+            {"$match": item_match},
+        ]
+        pipeline = [
+            {"$geoNear": {
+                "near": {"type": "Point", "coordinates": [lon, lat]},
+                "distanceField": "_dist_m",
+                "spherical": True,
+                "key": "location_geo",
+                "query": vendor_match,
+            }},
+            {"$lookup": {
+                "from": "menu_items",
+                "let": {"vid": "$vendor_id"},
+                "pipeline": items_lookup_pipeline,
+                "as": "_items",
+            }},
+            {"$unwind": "$_items"},
+            {"$sort": {"_dist_m": 1, "_items.menu_item_id": 1}},
+            {"$skip": offset},
+            {"$limit": fetch},
+        ]
+        docs = await db.vendors.aggregate(pipeline).to_list(fetch)
+        has_more = len(docs) > limit
+        page = docs[:limit] if has_more else docs
+        items = [_v2_slim_menu_card(d["_items"], d, round(d.get("_dist_m", 0) / 1000, 1)) for d in page]
+        next_cursor = _v2_encode_cursor({"offset": offset + limit}) if has_more else None
+        return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+
+    # Non-distance modes: start from menu_items, join vendor.
+    # localField/foreignField shortcut lets Mongo use vendor_id_1; the plain
+    # $match inside the pipeline then leverages status_1_discount_percentage_1
+    # (added in Phase 2) via ordinary index selection.
+    pre_pipeline: list = [{"$match": item_match}]
+    pre_pipeline.append({
+        "$lookup": {
+            "from": "vendors",
+            "localField": "vendor_id",
+            "foreignField": "vendor_id",
+            "pipeline": [
+                {"$match": {"status": "active"}},
+                {"$limit": 1},
+            ],
+            "as": "_vendor",
+        }
+    })
+    pre_pipeline.append({"$unwind": "$_vendor"})
+    if category:
+        pre_pipeline.append({"$match": {"_vendor.category": category}})
+
+    if effective_sort == "price":
+        sort_key, sort_dir = "discounted_price", 1
+    elif effective_sort == "price_desc":
+        sort_key, sort_dir = "discounted_price", -1
+    elif effective_sort == "discount":
+        pre_pipeline.append({"$addFields": {
+            "_discount_ratio": {"$cond": [
+                {"$gt": ["$original_price", 0]},
+                {"$divide": [{"$subtract": ["$original_price", "$discounted_price"]}, "$original_price"]},
+                0,
+            ]},
+        }})
+        sort_key, sort_dir = "_discount_ratio", -1
+    else:  # distance sort requested without lat/lon → fall back to price asc
+        sort_key, sort_dir = "discounted_price", 1
+
+    if cur is not None:
+        sv = cur.get("sort_value")
+        li = cur.get("last_item_id")
+        if sv is not None and li is not None:
+            cmp = "$gt" if sort_dir == 1 else "$lt"
+            pre_pipeline.append({"$match": {"$or": [
+                {sort_key: {cmp: sv}},
+                {sort_key: sv, "menu_item_id": {"$gt": li}},
+            ]}})
+
+    pre_pipeline.extend([
+        {"$sort": {sort_key: sort_dir, "menu_item_id": 1}},
+        {"$limit": fetch},
+    ])
+    docs = await db.menu_items.aggregate(pre_pipeline).to_list(fetch)
+    has_more = len(docs) > limit
+    page = docs[:limit] if has_more else docs
+    items = [_v2_slim_menu_card(d, d["_vendor"], None) for d in page]
+    if has_more and page:
+        last = page[-1]
+        next_cursor = _v2_encode_cursor({"sort_value": last.get(sort_key), "last_item_id": last.get("menu_item_id")})
+    else:
+        next_cursor = None
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+
+
+# ── /api/v2/browse-deals ────────────────────────────────────────────────
+@api_v2.get("/browse-deals")
+async def v2_browse_deals(
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    sort_by: Optional[str] = "discount",
+    category: Optional[str] = None,
+    limit: Optional[int] = _V2_DEFAULT_LIMIT,
+    cursor: Optional[str] = None,
+):
+    limit = _v2_clamp_limit(limit)
+    fetch = limit + 1
+    cur = _v2_decode_cursor(cursor)
+    effective_sort = sort_by or "discount"
+
+    if effective_sort == "distance" and lat is not None and lon is not None:
+        offset = int((cur or {}).get("offset") or 0)
+        vendor_match: dict = {"status": "active", "discount_percentage": {"$gt": 0}}
+        if category:
+            vendor_match["category"] = category
+        items_lookup_pipeline = [
+            {"$match": {"$expr": {"$eq": ["$vendor_id", "$$vid"]}}},
+            {"$match": {
+                "available_today": {"$ne": True},
+                "in_stock": {"$ne": False},
+                "original_price": {"$gt": 0},
+            }},
+        ]
+        pipeline = [
+            {"$geoNear": {
+                "near": {"type": "Point", "coordinates": [lon, lat]},
+                "distanceField": "_dist_m",
+                "spherical": True,
+                "key": "location_geo",
+                "query": vendor_match,
+            }},
+            {"$lookup": {
+                "from": "menu_items",
+                "let": {"vid": "$vendor_id"},
+                "pipeline": items_lookup_pipeline,
+                "as": "_items",
+            }},
+            {"$unwind": "$_items"},
+            {"$sort": {"_dist_m": 1, "_items.menu_item_id": 1}},
+            {"$skip": offset},
+            {"$limit": fetch},
+        ]
+        docs = await db.vendors.aggregate(pipeline).to_list(fetch)
+        has_more = len(docs) > limit
+        page = docs[:limit] if has_more else docs
+        items = [_v2_slim_menu_card(d["_items"], d, round(d.get("_dist_m", 0) / 1000, 1)) for d in page]
+        next_cursor = _v2_encode_cursor({"offset": offset + limit}) if has_more else None
+        return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+
+    # Non-distance: start from menu_items, join active-discounted vendors.
+    # localField/foreignField + a plain $match lets the compound
+    # status_1_discount_percentage_1 index (added in Phase 2) do the work.
+    item_match: dict = {
+        "available_today": {"$ne": True},
+        "in_stock": {"$ne": False},
+        "original_price": {"$gt": 0},
+    }
+    pre_pipeline: list = [
+        {"$match": item_match},
+        {"$lookup": {
+            "from": "vendors",
+            "localField": "vendor_id",
+            "foreignField": "vendor_id",
+            "pipeline": [
+                {"$match": {"status": "active", "discount_percentage": {"$gt": 0}}},
+                {"$limit": 1},
+            ],
+            "as": "_vendor",
+        }},
+        {"$unwind": "$_vendor"},
+    ]
+    if category:
+        pre_pipeline.append({"$match": {"_vendor.category": category}})
+
+    if effective_sort == "price":
+        pre_pipeline.append({"$addFields": {"_sort_price": {"$multiply": [
+            "$original_price",
+            {"$subtract": [1, {"$divide": ["$_vendor.discount_percentage", 100]}]},
+        ]}}})
+        sort_key, sort_dir = "_sort_price", 1
+    elif effective_sort == "price_desc":
+        pre_pipeline.append({"$addFields": {"_sort_price": {"$multiply": [
+            "$original_price",
+            {"$subtract": [1, {"$divide": ["$_vendor.discount_percentage", 100]}]},
+        ]}}})
+        sort_key, sort_dir = "_sort_price", -1
+    else:  # discount (default)
+        sort_key, sort_dir = "_vendor.discount_percentage", -1
+
+    if cur is not None:
+        sv = cur.get("sort_value")
+        li = cur.get("last_item_id")
+        if sv is not None and li is not None:
+            cmp = "$gt" if sort_dir == 1 else "$lt"
+            pre_pipeline.append({"$match": {"$or": [
+                {sort_key: {cmp: sv}},
+                {sort_key: sv, "menu_item_id": {"$gt": li}},
+            ]}})
+
+    pre_pipeline.extend([
+        {"$sort": {sort_key: sort_dir, "menu_item_id": 1}},
+        {"$limit": fetch},
+    ])
+    docs = await db.menu_items.aggregate(pre_pipeline).to_list(fetch)
+    has_more = len(docs) > limit
+    page = docs[:limit] if has_more else docs
+    items = [_v2_slim_menu_card(d, d["_vendor"], None) for d in page]
+    if has_more and page:
+        last = page[-1]
+        # For discount sort, sort_value comes from the joined vendor doc.
+        if sort_key == "_vendor.discount_percentage":
+            sv = (last.get("_vendor") or {}).get("discount_percentage")
+        else:
+            sv = last.get(sort_key)
+        next_cursor = _v2_encode_cursor({"sort_value": sv, "last_item_id": last.get("menu_item_id")})
+    else:
+        next_cursor = None
+    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+
+
+# ── /api/v2/featured-deals ──────────────────────────────────────────────
+@api_v2.get("/featured-deals")
+async def v2_featured_deals(
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    limit: Optional[int] = _V2_DEFAULT_LIMIT,
+):
+    limit = _v2_clamp_limit(limit)
+
+    featured_lookup = {
+        "$lookup": {
+            "from": "menu_items",
+            "let": {"vid": "$vendor_id"},
+            "pipeline": [
+                {"$match": {"$expr": {"$and": [
+                    {"$eq": ["$vendor_id", "$$vid"]},
+                    {"$ne": ["$available_today", True]},
+                    {"$ne": ["$in_stock", False]},
+                    {"$gt": ["$original_price", 0]},
+                ]}}},
+                {"$sort": {"original_price": -1, "menu_item_id": 1}},
+                {"$limit": 1},
+            ],
+            "as": "_featured",
+        }
+    }
+    match_has_featured = {"$match": {
+        "_featured.0": {"$exists": True},
+        "discount_percentage": {"$gt": 0},
+    }}
+
+    if lat is not None and lon is not None:
+        pipeline = [
+            {"$geoNear": {
+                "near": {"type": "Point", "coordinates": [lon, lat]},
+                "distanceField": "_dist_m",
+                "spherical": True,
+                "key": "location_geo",
+                "query": {"status": "active", "discount_percentage": {"$gt": 0}},
+            }},
+            featured_lookup,
+            match_has_featured,
+            {"$sort": {"discount_percentage": -1, "_dist_m": 1}},
+            {"$limit": limit},
+        ]
+    else:
+        pipeline = [
+            {"$match": {"status": "active", "discount_percentage": {"$gt": 0}}},
+            featured_lookup,
+            match_has_featured,
+            {"$sort": {"discount_percentage": -1, "name": 1}},
+            {"$limit": limit},
+        ]
+
+    docs = await db.vendors.aggregate(pipeline).to_list(limit)
+    items = []
+    for v in docs:
+        fi = (v.get("_featured") or [None])[0]
+        if not fi:
+            continue
+        op = fi.get("original_price") or 0
+        disc = v.get("discount_percentage") or 0
+        price = round(op * (1 - disc / 100), 2) if op else 0
+        distance_km = round(v.get("_dist_m", 0) / 1000, 1) if "_dist_m" in v else None
+        items.append({
+            "vendor_id": v.get("vendor_id"),
+            "vendor_name": v.get("name", ""),
+            "vendor_category": v.get("category", ""),
+            "verified": _v2_vendor_verified(v),
+            "distance_km": distance_km,
+            "reason": "Top deal",
+            "item_id": fi.get("menu_item_id"),
+            "item_name": fi.get("name", ""),
+            "item_image": fi.get("image_url", ""),
+            "item_thumbnail": fi.get("thumbnail_url") or fi.get("image_url", ""),
+            "food_type": fi.get("food_type", "veg"),
+            "original_price": op,
+            "price": price,
+            "discount": round(disc),
+        })
+
+    return {"items": items, "next_cursor": None, "has_more": False}
+
+
 # ── Wire up ─────────────────────────────────────────────────────────────
 app.include_router(api)
+app.include_router(api_v2)
 
 app.add_middleware(
     CORSMiddleware,

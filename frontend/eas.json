@@ -10,7 +10,7 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://food-rescue-app-9.preview.emergentagent.com",
+        "EXPO_PUBLIC_BACKEND_URL": "https://perfectly-good-build.emergent.host",
         "GRADLE_OPTS": "-Xmx4096m -XX:MaxMetaspaceSize=512m",
         "ORG_GRADLE_PROJECT_reactNativeArchitectures": "arm64-v8a"
       }
@@ -18,7 +18,7 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://food-rescue-app-9.preview.emergentagent.com",
+        "EXPO_PUBLIC_BACKEND_URL": "https://perfectly-good-build.emergent.host",
         "GRADLE_OPTS": "-Xmx4096m -XX:MaxMetaspaceSize=512m",
         "ORG_GRADLE_PROJECT_reactNativeArchitectures": "arm64-v8a"
       }
@@ -30,7 +30,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://food-rescue-app-9.preview.emergentagent.com",
+        "EXPO_PUBLIC_BACKEND_URL": "https://perfectly-good-build.emergent.host",
         "GRADLE_OPTS": "-Xmx4096m -XX:MaxMetaspaceSize=512m",
         "ORG_GRADLE_PROJECT_reactNativeArchitectures": "arm64-v8a"
       }
