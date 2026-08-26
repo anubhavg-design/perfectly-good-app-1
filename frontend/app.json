@@ -2,7 +2,7 @@
   "expo": {
     "name": "Perfectly Good",
     "slug": "perfectly-good",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "perfectly-good",
@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "in.perfectlygood.app",
+      "buildNumber": "1.0.3",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -22,7 +23,7 @@
       "usesAppleSignIn": true
     },
     "android": {
-      "versionCode": 136,
+      "versionCode": 137,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"

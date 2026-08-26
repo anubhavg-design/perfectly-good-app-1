@@ -1,6 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { getClientId } from './clientId';
+
+// Phase 3: sent on every request. Backend reads them to decide v1↔v2 rollout.
+const APP_VERSION: string =
+  (Constants.expoConfig as any)?.version ||
+  (Constants as any).manifest?.version ||
+  '0.0.0';
+
+export function getAppVersion(): string {
+  return APP_VERSION;
+}
 
 function resolveApiBase(): string {
   const envApiUrl = process.env.EXPO_PUBLIC_API_URL;
@@ -71,6 +82,8 @@ export async function apiFetch(path: string, options: FetchOptions = {}) {
   const { skipAuth, ...fetchOptions } = options;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'X-App-Version': APP_VERSION,
+    'X-Client-Id': await getClientId(),
     ...(fetchOptions.headers as Record<string, string> || {}),
   };
 
